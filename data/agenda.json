@@ -1,6 +1,6 @@
 {
   "versao": 1,
-  "atualizadoEm": "2026-11-18T20:07:40.049Z",
+  "atualizadoEm": "2026-11-18T20:09:46.862Z",
   "eventos": [
     {
       "id": "emwmb5ll82n7n2",
@@ -19,6 +19,28 @@
       "titulo": "Apresentação final",
       "uc": "UC00599",
       "data": "2026-11-19",
+      "hora": "19:10",
+      "notas": "",
+      "feito": false,
+      "nota": null
+    },
+    {
+      "id": "emwmk0kjkasy3v",
+      "tipo": "teste",
+      "titulo": "Exame final CCNA2",
+      "uc": "UC01478",
+      "data": "2026-11-23",
+      "hora": "19:10",
+      "notas": "",
+      "feito": false,
+      "nota": null
+    },
+    {
+      "id": "emwmk20dqgpo10",
+      "tipo": "trabalho",
+      "titulo": "Último Manual",
+      "uc": "",
+      "data": "2026-12-19",
       "hora": "19:10",
       "notas": "",
       "feito": false,

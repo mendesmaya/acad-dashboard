@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jornada Ciber</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/base.css">
+</head>
+<body>
+<div id="mini" hidden role="status"></div>
+<header class="topo" id="topo"></header>
+<div class="wrap bloqueada" id="wrap">
+  <h1>Jornada Ciber</h1>
+  <p class="sub">CET Técnico/a Especialista em Cibersegurança · ATEC · 2026/27 · média simples das notas arredondadas</p>
+
+  <section id="cofre" class="panel cofre" hidden></section>
+
+  <form id="rapido" class="rapido" autocomplete="off">
+    <div class="combo">
+      <input id="q" type="text" placeholder="Lançar nota: código ou nome do módulo" aria-label="Módulo" aria-controls="sug" aria-expanded="false">
+      <ul id="sug" class="sug" hidden></ul>
+    </div>
+    <input id="qn" type="text" inputmode="decimal" placeholder="Nota" aria-label="Nota">
+    <button class="primary">Lançar</button>
+  </form>
+
+  <div id="hero" class="hero"></div>
+  <div id="graficos"></div>
+  <div id="secoes"></div>
+
+  <h2>Emblemas</h2>
+  <div id="badges" class="badges" aria-label="Emblemas"></div>
+
+  <footer>
+    <button class="ghost" id="exportar">Exportar backup</button>
+    <button class="ghost" id="importar">Importar backup</button>
+    <button class="ghost" id="repor">Repor dados iniciais</button>
+    <button class="ghost" id="mudar-senha">Mudar password</button>
+    <button class="ghost" id="bloquear">Bloquear</button>
+    <span class="nota-rodape">As notas ficam <b>cifradas</b> (só abrem com a tua password) no repositório do GitHub, com o token ligado, e numa cópia cifrada neste browser. O ficheiro de backup exportado <b>não</b> está cifrado: guarda-o em local seguro. Datas previstas do cronograma V10 (revisão de 06/10/2026).</span>
+  </footer>
+</div>
+<dialog id="dlg-senha"><div class="dlg">
+  <h2>Mudar password</h2>
+  <input id="ns1" type="password" autocomplete="new-password" placeholder="Nova password (mín. 8 caracteres)" aria-label="Nova password">
+  <input id="ns2" type="password" autocomplete="new-password" placeholder="Repete a nova password" aria-label="Repete a nova password">
+  <div class="erro-dlg" id="ns-erro" role="alert"></div>
+  <div class="dlg-botoes"><button class="primary" id="ns-guardar" type="button">Guardar</button><button id="ns-cancelar" type="button">Cancelar</button></div>
+</div></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="ficheiro" accept="application/json,.json" hidden>
+
+<script src="js/dados-cet.js"></script>
+<script src="js/notas-logic.js"></script>
+<script src="js/armazem.js"></script>
+<script src="js/cofre.js"></script>
+<script src="js/agenda-logic.js"></script>
+<script src="js/app-comum.js"></script>
+<script>
+(function () {
+  var armazem = AppComum.iniciar({ pagina: "notas" });
+  var state, ultimo = null, aberto = null, focarAberto = false, toastT = null, sel = null, hip = 18, obs = null;
+
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function fmt(n) { return Notas.formatar(n); }
+  function fmtCr(n) { return String(n).replace(".", ","); }
+  function hoje() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  var H = hoje();
+  function fd(iso) { return Notas.formatarData(iso, H); }
+  function $(id) { return document.getElementById(id); }
+
+  function estadoInicial() { var d = clone(window.DADOS_INICIAIS); return { pri: d.pri, cet: d.cet, alvo: 19 }; }
+
+  // Só o CET e o alvo são editáveis/guardados (data/notas.json). Qualquer dado inválido é ignorado.
+  function estadoDeDados(s) {
+    var base = estadoInicial();
+    if (!s || typeof s !== "object") return base;
+    base.cet = Notas.aplicarGuardado(base.cet, s.cet);
+    base.pri = Notas.aplicarPri(base.pri, s.pri);
+    if ([18, 19, 20].indexOf(s.alvo) >= 0) base.alvo = s.alvo;
+    return base;
+  }
+  function payloadAtual() {
+    return {
+      alvo: state.alvo,
+      cet: state.cet.map(function (m) { return { codigo: m.codigo, estado: m.estado, nota: m.nota, notaDecimal: m.notaDecimal, provisoria: m.provisoria }; }),
+      pri: state.pri.filter(function (m) { return m.estado === "com-nota"; }).map(function (m) { return { codigo: m.codigo, nota: m.nota, notaDecimal: m.notaDecimal }; }),
+    };
+  }
+  // As notas só saem deste browser cifradas (envelope AES-GCM); a cópia local também fica cifrada.
+  var sessao = null, envAtual = null, legado = null, filaGravar = Promise.resolve();
+  var CHAVE_SESSAO = "acad-sessao-notas";
+  function guardarEstado() {
+    if (!sessao) return;
+    filaGravar = filaGravar
+      .then(function () { return Cofre.cifrar(payloadAtual(), sessao); })
+      .then(function (env) { envAtual = env; return armazem.guardar("notas", env); })
+      .catch(function () { toast("Não foi possível cifrar e guardar as notas."); });
+  }
+  function guardarSessao() {
+    Cofre.exportar(sessao).then(function (t) { try { sessionStorage.setItem(CHAVE_SESSAO, t); } catch (e) { /* sem sessionStorage */ } });
+  }
+  function tentarSessao(env) {
+    var t = null;
+    try { t = sessionStorage.getItem(CHAVE_SESSAO); } catch (e) { /* ignora */ }
+    if (!t) return Promise.resolve(null);
+    return Cofre.importar(t).then(function (se) {
+      if (se.salt !== env.salt) return null;
+      return Cofre.decifrar(env, se).then(function (payload) { return { se: se, payload: payload }; });
+    }).catch(function () { try { sessionStorage.removeItem(CHAVE_SESSAO); } catch (e) { /* ignora */ } return null; });
+  }
+  function abrirNotas(estado) {
+    state = estado;
+    $("cofre").hidden = true; $("wrap").classList.remove("bloqueada"); document.body.classList.remove("bloqueado");
+    render();
+  }
+  function mostrarCofre(modo) {
+    var novo = modo !== "bloqueado", el = $("cofre");
+    el.hidden = false; $("wrap").classList.add("bloqueada"); document.body.classList.add("bloqueado");
+    el.innerHTML = '<div class="label">Notas protegidas</div><h2 style="margin:6px 0 4px">' + (novo ? "Define uma password" : "Introduz a password") + "</h2>" +
+      (modo === "migrar" ? '<p class="msg">Encontrei notas não cifradas neste dispositivo. Define uma password para as proteger.</p>' :
+        novo ? '<p class="msg">As notas ficam cifradas e só abrem com esta password. <b>Se a esqueceres, não há forma de as recuperar</b>: guarda também o ficheiro de backup.</p>' :
+        '<p class="msg">As notas estão cifradas. Só tu as consegues abrir.</p>') +
+      '<form id="form-cofre" data-modo="' + modo + '" autocomplete="off"><input id="cofre-senha" type="password" autocomplete="' + (novo ? "new-password" : "current-password") + '" placeholder="' + (novo ? "Nova password (mín. 8 caracteres)" : "Password") + '" aria-label="Password">' +
+      (novo ? '<input id="cofre-senha2" type="password" autocomplete="new-password" placeholder="Repete a password" aria-label="Repete a password">' : "") +
+      '<div class="erro-dlg" id="cofre-erro" role="alert"></div><button class="primary" id="cofre-ok">' + (novo ? "Definir password" : "Abrir") + "</button></form>";
+    $("cofre-senha").focus();
+  }
+  function submeterCofre(form) {
+    var modo = form.getAttribute("data-modo"), senha = $("cofre-senha").value, erro = $("cofre-erro"), ok = $("cofre-ok");
+    erro.textContent = "";
+    if (modo === "bloqueado") {
+      if (!senha) { erro.textContent = "Escreve a password."; return; }
+      ok.disabled = true;
+      Cofre.derivar(senha, envAtual.salt, envAtual.it).then(function (se) {
+        return Cofre.decifrar(envAtual, se).then(function (payload) { sessao = se; guardarSessao(); abrirNotas(estadoDeDados(payload)); });
+      }).catch(function () { erro.textContent = "Password errada."; ok.disabled = false; });
+      return;
+    }
+    if (senha.length < 8) { erro.textContent = "A password tem de ter pelo menos 8 caracteres."; return; }
+    if (senha !== $("cofre-senha2").value) { erro.textContent = "As passwords não coincidem."; return; }
+    ok.disabled = true;
+    Cofre.novo(senha).then(function (se) {
+      sessao = se; guardarSessao();
+      abrirNotas(legado ? estadoDeDados(legado) : estadoInicial());
+      guardarEstado();
+      toast(legado ? "Notas protegidas com a nova password." : "Password definida. Importa o teu backup no fundo da página.");
+    }).catch(function () { erro.textContent = "Não foi possível definir a password."; ok.disabled = false; });
+  }
+
+  function achar(cod) { for (var i = 0; i < state.cet.length; i++) if (state.cet[i].codigo === cod) return state.cet[i]; return null; }
+  function gcls(n) { return n >= 20 ? "g20" : n >= 19 ? "g19" : n >= 18 ? "g18" : n >= 17 ? "g17" : "gx"; }
+  function snap(m) { return { estado: m.estado, nota: m.nota, notaDecimal: m.notaDecimal, provisoria: m.provisoria }; }
+  function restaurar(cod, s) { var m = achar(cod); if (!m) return; m.estado = s.estado; m.nota = s.nota; m.notaDecimal = s.notaDecimal; m.provisoria = s.provisoria; guardarEstado(); render(); }
+
+  function toast(txt, acao) {
+    var el = $("toast");
+    el.textContent = txt;
+    if (acao) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = acao.label;
+      b.addEventListener("click", function () { acao.fn(); el.classList.remove("show"); });
+      el.appendChild(b);
+    }
+    el.classList.add("show");
+    clearTimeout(toastT); toastT = setTimeout(function () { el.classList.remove("show"); }, acao ? 7000 : 3200);
+  }
+  function mensagemNota(n) {
+    if (n === 20) return "Vinte! Lendário.";
+    if (n === 19) return "Dezanove! Quase perfeito.";
+    if (n === 18) return "Dezoito, bom ritmo.";
+    return "Nota lançada.";
+  }
+
+  // ---- ações ----
+  function lancar(cod, texto) {
+    var m = achar(cod); if (!m) return false;
+    var nota = Notas.normalizarNota(texto);
+    if (nota === null) { toast("Nota inválida. Usa um valor de 0 a 20 (ex.: 18 ou 18,19)."); return false; }
+    var v = Number(String(texto).trim().replace(",", "."));
+    var antes = snap(m);
+    m.estado = "com-nota"; m.nota = nota; m.notaDecimal = (v % 1 !== 0) ? v : null; m.provisoria = null;
+    ultimo = cod; aberto = null; guardarEstado(); render();
+    toast(mensagemNota(nota), { label: "Desfazer", fn: function () { restaurar(cod, antes); } });
+    return true;
+  }
+  function setEstado(cod, estado, msg) {
+    var m = achar(cod); if (!m) return;
+    var antes = snap(m);
+    m.estado = estado; m.nota = null; m.notaDecimal = null; m.provisoria = null;
+    aberto = null; guardarEstado(); render();
+    if (msg) toast(msg, { label: "Desfazer", fn: function () { restaurar(cod, antes); } });
+  }
+  function setProvisoria(cod, texto) {
+    var m = achar(cod); if (!m || m.estado !== "terminado") return;
+    var p = Notas.normalizarNota(texto);
+    if (p === null && String(texto).trim() !== "") toast("Nota provisória inválida (0 a 20).");
+    m.provisoria = p; guardarEstado(); render();
+  }
+  function terminarTodos() {
+    var lista = state.cet.filter(function (m) { return m.estado === "por-cursar" && Notas.estadoTemporal(m, H) === "terminou"; });
+    var antes = lista.map(function (m) { return [m.codigo, snap(m)]; });
+    lista.forEach(function (m) { m.estado = "terminado"; });
+    guardarEstado(); render();
+    toast(lista.length + " módulo(s) marcado(s) como terminado(s).", { label: "Desfazer", fn: function () { antes.forEach(function (p) { restaurar(p[0], p[1]); }); } });
+  }
+
+  // ---- render ----
+  function mediaHTML(r, small) {
+    return '<div class="big' + (small ? " small" : "") + '"><span class="rnd" aria-label="média arredondada">' + (r ? r.arredondada : "—") + '</span><span class="dec" aria-label="média com decimais">' + (r ? fmt(r.decimal) : "") + "</span></div>";
+  }
+
+  function tagTemporal(m, neutro) {
+    var e = Notas.estadoTemporal(m, H);
+    if (!e) return "";
+    if (e === "terminou") return '<span class="tag ' + (neutro ? "" : "warn") + '">terminou a ' + fd(m.fim) + "</span>";
+    if (e === "a-decorrer") return '<span class="tag on">a decorrer · até ' + fd(m.fim) + "</span>";
+    return '<span class="tag">começa a ' + fd(m.inicio) + "</span>";
+  }
+  function tagsBase(m) {
+    return (m.tipo === "opcional" ? '<span class="tag">opcional</span>' : "") + (m.creditos ? '<span class="tag">' + fmtCr(m.creditos) + " créditos</span>" : "");
+  }
+
+  function formLancar(m, placeholder, primario) {
+    var cod = esc(m.codigo);
+    return '<form class="f" data-act="lancar" data-cod="' + cod + '"><input type="text" inputmode="decimal" autocomplete="off" aria-label="Nota de ' + cod + '" placeholder="' + placeholder + '"><button class="' + (primario ? "primary" : "") + '">' + (primario ? "Lançar oficial" : "Guardar") + "</button></form>";
+  }
+
+  function cardTerminado(m) {
+    var cod = esc(m.codigo);
+    return '<div class="card terminado' + (ultimo === m.codigo ? " pop" : "") + '"><div class="cod">' + cod + '</div><div class="nome">' + esc(m.nome) + '</div><div class="tags">' + tagsBase(m) + tagTemporal(m, true) + "</div>" +
+      '<div class="row"><label for="p-' + cod + '">Nota provisória</label><input id="p-' + cod + '" class="prov" data-cod="' + cod + '" type="text" inputmode="decimal" autocomplete="off" style="max-width:100px" value="' + (m.provisoria !== null ? m.provisoria : "") + '" placeholder="ex.: 19"></div>' +
+      formLancar(m, "Nota oficial (quando sair)", true) +
+      '<div class="row"><button class="ghost" data-act="voltar" data-cod="' + cod + '">Voltar a por cursar</button></div></div>';
+  }
+
+  function itemLista(m) {
+    var cod = esc(m.codigo), isAberto = aberto === m.codigo, e = Notas.estadoTemporal(m, H);
+    var lado, edit = "";
+    if (m.estado === "com-nota") {
+      lado = '<span class="nota"><b class="' + gcls(m.nota) + '">' + m.nota + "</b>" + (m.notaDecimal !== null ? "<small>(" + fmt(m.notaDecimal) + ")</small>" : "") + "</span>" +
+        '<button data-act="abrir" data-cod="' + cod + '" aria-expanded="' + isAberto + '">Editar</button>';
+      if (isAberto) edit = formLancar(m, "Corrigir nota") + '<div class="row"><button class="ghost" data-act="anular" data-cod="' + cod + '">Anular nota</button></div>';
+    } else {
+      lado = (e === "terminou" ? '<button data-act="terminar" data-cod="' + cod + '">Marcar terminado</button>' : "") +
+        '<button data-act="abrir" data-cod="' + cod + '" aria-expanded="' + isAberto + '">+ nota</button>';
+      if (isAberto) edit = formLancar(m, "Nota (18 ou 18,19)") + (e === "terminou" ? "" : '<div class="row"><button class="ghost" data-act="terminar" data-cod="' + cod + '">Já terminou, ainda sem nota</button></div>');
+    }
+    return '<div class="item' + (isAberto ? " aberto" : "") + (ultimo === m.codigo ? " pop" : "") + '"><div class="item-top"><div class="item-main"><span class="cod">' + cod + '</span><span class="nome">' + esc(m.nome) + '</span><div class="tags">' + tagsBase(m) + (m.estado === "com-nota" ? "" : tagTemporal(m)) + '</div></div><div class="item-side">' + lado + "</div></div>" + (edit ? '<div class="item-edit">' + edit + "</div>" : "") + "</div>";
+  }
+
+  function secaoLista(titulo, lista, vazio) {
+    return "<h2>" + titulo + ' <span class="count">' + lista.length + "</span></h2>" + (lista.length ? '<div class="lista">' + lista.map(itemLista).join("") + "</div>" : '<div class="vazio">' + vazio + "</div>");
+  }
+
+  function simulador(cet) {
+    var r = Notas.necessarioParaMedia(cet, state.alvo), txt;
+    if (r.restantes === 0) txt = r.possivel ? "Curso fechado: alvo cumprido." : "Curso fechado: o alvo não foi atingido.";
+    else if (!r.possivel) txt = "Já não dá para chegar a " + state.alvo + ". Tenta um alvo mais baixo.";
+    else if (r.notaMediaNecessaria === 0) txt = "Já está garantido, mesmo com 0 nos restantes.";
+    else txt = "Precisas de uma média de <b>" + r.notaMediaNecessaria + "</b> nos <b>" + r.restantes + "</b> módulos que ainda não têm nota oficial.";
+    var bt = [18, 19, 20].map(function (a) { return '<button data-act="alvo" data-alvo="' + a + '" class="' + (a === state.alvo ? "on" : "") + '" aria-pressed="' + (a === state.alvo) + '">' + a + "</button>"; }).join("");
+    var slider = r.restantes === 0 ? "" : '<div class="hip"><label for="hip">E se tirar <b id="hipv">' + hip + '</b> em todos os restantes?</label><input type="range" id="hip" min="10" max="20" step="1" value="' + hip + '"><div class="res" id="hipres"></div></div>';
+    return '<div class="panel"><div class="label">Simulador · média final alvo</div><div class="alvos">' + bt + '</div><p class="sim-res">' + txt + "</p>" + slider + "</div>";
+  }
+  function atualizarHip() {
+    var out = $("hipres"); if (!out) return;
+    var r = Notas.mediaSeTirar(state.cet, hip);
+    $("hipv").textContent = hip;
+    out.innerHTML = r ? "Média final <b>" + fmt(r.decimal) + "</b> → <b>" + r.arredondada + "</b>" : "";
+  }
+
+  function projetadaPanel(cet, ofc) {
+    var prov = cet.filter(function (m) { return m.estado === "terminado" && Notas.normalizarNota(m.provisoria) !== null; });
+    var p = Notas.mediaProjetada(cet);
+    if (!prov.length || !p) return "";
+    var dif = ofc ? p.decimal - ofc.decimal : 0;
+    var sinal = dif > 0.005 ? "▲ +" + fmt(dif) : dif < -0.005 ? "▼ " + fmt(dif) : "igual à oficial";
+    return '<div class="panel"><div class="label">Média projetada <span class="pill warn">provisória, não oficial</span></div>' + mediaHTML(p, true) + '<p class="msg">Com ' + prov.length + " nota(s) provisória(s) · " + sinal + " face à oficial</p></div>";
+  }
+
+  function priPanel() {
+    var r = Notas.mediaBloco(state.pri);
+    var linhas = state.pri.filter(function (m) { return m.estado === "com-nota"; }).map(function (m) { return "<tr><td>" + esc(m.codigo) + "</td><td>" + esc(m.nome) + '</td><td class="n">' + m.nota + (m.notaDecimal !== null ? " (" + fmt(m.notaDecimal) + ")" : "") + "</td></tr>"; }).join("") || '<tr><td colspan="3">Sem notas do PRI.</td></tr>';
+    return '<div class="panel"><div class="label">PRI · bloco à parte <span class="pill">não conta para a média final</span></div>' + mediaHTML(r, true) +
+      '<p class="msg">' + (r ? r.n : 0) + " módulos</p><details><summary>Ver notas do PRI</summary><table>" + linhas + "</table></details></div>";
+  }
+
+  function resumoPanel(cet, ofc) {
+    var com = cet.filter(function (m) { return m.estado === "com-nota"; });
+    var total = 0, feitos = 0;
+    cet.forEach(function (m) { total += m.creditos || 0; });
+    com.forEach(function (m) { feitos += m.creditos || 0; });
+    if (!com.length) return "";
+    var notas = com.map(function (m) { return m.nota; }), max = Math.max.apply(null, notas), min = Math.min.apply(null, notas);
+    function tile(v, txt) { return '<div class="stat"><b>' + v + "</b><span>" + txt + "</span></div>"; }
+    return '<div class="panel"><div class="label">Resumo</div><div class="stats">' +
+      tile(fmtCr(feitos) + " / " + fmtCr(total), "créditos concluídos") +
+      tile(notas.filter(function (n) { return n === 20; }).length, "notas 20") +
+      tile(max, "melhor nota") + tile(min, "nota mais baixa") + "</div></div>";
+  }
+
+  var agenda = null;
+  function prazosPanel() {
+    var pr = agenda && Array.isArray(agenda.eventos) ? Agenda.proximosPrazos(agenda.eventos, H, 14) : [];
+    var h = '<div class="panel"><div class="label">Próximos prazos · 14 dias</div>';
+    if (!pr.length) h += '<p class="msg" style="margin:8px 0 0">Nada nos próximos 14 dias.</p>';
+    pr.forEach(function (e) {
+      h += '<div class="prazo-ro"><b>' + esc(e.titulo) + "</b><span>" + fd(e.data) + (e.hora ? " · " + e.hora : "") + (e.uc ? " · " + esc(e.uc) : "") + "</span></div>";
+    });
+    return h + '<p class="next" style="margin-top:10px"><a href="index.html">Abrir o calendário →</a></p></div>';
+  }
+
+  function graficos(cet) {
+    var ev = Notas.evolucao(cet);
+    if (ev.length < 2) return "";
+    var vals = ev.map(function (e) { return e.media; });
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    var lo = Math.floor((mn - 0.2) * 2) / 2, hi = Math.min(20, Math.ceil((mx + 0.2) * 2) / 2);
+    if (hi - lo < 1) lo = hi - 1;
+    var W = 300, Hh = 90, px = 22, py = 10, n = ev.length;
+    function X(i) { return px + (W - px - 8) * (i / (n - 1)); }
+    function Y(v) { return py + (Hh - 2 * py) * (1 - (v - lo) / (hi - lo)); }
+    var pts = ev.map(function (e, i) { return X(i).toFixed(1) + "," + Y(e.media).toFixed(1); }).join(" ");
+    var l = ev[n - 1];
+    var svg = '<svg class="ev" viewBox="0 0 ' + W + " " + Hh + '" role="img" aria-label="Evolução da média: de ' + fmt(vals[0]) + " para " + fmt(l.media) + " ao longo de " + n + ' módulos">' +
+      '<line class="grid" x1="' + px + '" x2="' + W + '" y1="' + Y(hi) + '" y2="' + Y(hi) + '"/><line class="grid" x1="' + px + '" x2="' + W + '" y1="' + Y(lo) + '" y2="' + Y(lo) + '"/>' +
+      '<text x="0" y="' + (Y(hi) + 3) + '">' + hi.toFixed(1).replace(".", ",") + '</text><text x="0" y="' + (Y(lo) + 3) + '">' + lo.toFixed(1).replace(".", ",") + "</text>" +
+      '<polyline class="linha" points="' + pts + '"/><circle class="pt" cx="' + X(n - 1).toFixed(1) + '" cy="' + Y(l.media).toFixed(1) + '" r="3.5"/></svg>';
+    var d = Notas.distribuicao(cet), notas = Object.keys(d).map(Number), minN = Math.min(16, Math.min.apply(null, notas)), maxC = Math.max.apply(null, notas.map(function (k) { return d[k]; }));
+    var linhas = "";
+    for (var k = 20; k >= minN; k--) linhas += '<div class="drow"><span>' + k + '</span><i class="' + (d[k] ? "" : "z") + '" style="width:' + (d[k] ? (d[k] / maxC * 100).toFixed(0) : 0) + '%"></i><span>' + (d[k] || 0) + "</span></div>";
+    return '<div class="graf"><div class="panel"><div class="label">Evolução da média · ordem do cronograma</div>' + svg + '<p class="msg" style="margin:6px 0 0">De ' + fmt(vals[0]) + " para " + fmt(l.media) + " em " + n + ' módulos</p></div><div class="panel"><div class="label">Distribuição das notas</div>' + linhas + "</div></div>";
+  }
+
+  function emblemas(cet, ofc) {
+    var notas = cet.filter(function (m) { return m.estado === "com-nota"; }).map(function (m) { return m.nota; });
+    var n = notas.length;
+    var lista = [
+      ["Primeira nota 20", notas.indexOf(20) >= 0],
+      ["10 módulos com nota", n >= 10],
+      ["Metade do curso (14 módulos)", n >= 14],
+      ["20 módulos com nota", n >= 20],
+      ["Sem notas abaixo de 18 (5+ módulos)", n >= 5 && Math.min.apply(null, notas) >= 18],
+      ["Média arredondada ≥ 19", !!ofc && n >= 3 && ofc.arredondada >= 19],
+      ["Todos os 27 módulos feitos", n === cet.length],
+    ];
+    return lista.map(function (b) { return '<span class="badge' + (b[1] ? " on" : "") + '" title="' + (b[1] ? "Desbloqueado" : "Por desbloquear") + '">' + b[0] + "</span>"; }).join("");
+  }
+
+  function ordTemp(m) { var e = Notas.estadoTemporal(m, H); return e === "terminou" ? 0 : e === "a-decorrer" ? 1 : e === "futuro" ? 2 : 3; }
+
+  function render() {
+    H = hoje();
+    var cet = state.cet, ofc = Notas.mediaBloco(cet), total = cet.length, n = ofc ? ofc.n : 0;
+    var marg = ofc ? Notas.margemLimiares(ofc.decimal) : null;
+    var margTxt = !ofc ? "Lança a primeira nota para começar." :
+      "Segura o " + marg.arredondada + " até cair abaixo de " + fmt(marg.arredondada - 0.5) + " (folga de " + fmt(marg.acima) + ")." + (marg.falta !== null ? " Para o " + marg.seguinte + " faltam " + fmt(marg.falta) + "." : "");
+    var decorrer = cet.filter(function (m) { return m.estado === "por-cursar" && Notas.estadoTemporal(m, H) === "a-decorrer"; }).sort(function (a, b) { return a.fim < b.fim ? -1 : a.fim > b.fim ? 1 : 0; });
+    var next = decorrer.length ? '<p class="next">Próximos a terminar: ' + decorrer.slice(0, 3).map(function (m) { return "<b title=\"" + esc(m.nome) + '">' + esc(m.codigo) + "</b> " + fd(m.fim); }).join(" · ") + "</p>" : "";
+
+    $("hero").innerHTML =
+      '<div class="stack colmain"><div class="panel main" id="heroMain"><div class="label">Média final do curso · CET · oficial</div>' + mediaHTML(ofc) +
+      '<p class="msg">' + margTxt + '</p><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="' + total + '" aria-valuenow="' + n + '"><i style="width:' + (n / total * 100).toFixed(1) + '%"></i></div>' +
+      '<div class="barlab"><span>' + n + " de " + total + " módulos com nota oficial</span><span>" + Math.round(n / total * 100) + "%</span></div>" + next + "</div>" + resumoPanel(cet, ofc) + prazosPanel() + "</div>" +
+      '<div class="stack">' + simulador(cet) + projetadaPanel(cet, ofc) + priPanel() + "</div>";
+    $("graficos").innerHTML = graficos(cet);
+    $("badges").innerHTML = emblemas(cet, ofc);
+    $("mini").innerHTML = "<strong>" + (ofc ? ofc.arredondada : "—") + "</strong><span>" + (ofc ? fmt(ofc.decimal) : "") + "</span><span>· " + n + "/" + total + " módulos</span>";
+    atualizarHip();
+
+    var ter = cet.filter(function (m) { return m.estado === "terminado"; });
+    var por = cet.filter(function (m) { return m.estado === "por-cursar"; }).sort(function (a, b) {
+      var d = ordTemp(a) - ordTemp(b); if (d) return d;
+      var ka = ordTemp(a) === 2 ? a.inicio : a.fim, kb = ordTemp(b) === 2 ? b.inicio : b.fim;
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    });
+    var com = cet.filter(function (m) { return m.estado === "com-nota"; }).sort(function (a, b) { return (a.fim || "") < (b.fim || "") ? 1 : -1; });
+    var ja = por.filter(function (m) { return Notas.estadoTemporal(m, H) === "terminou"; });
+    var aviso = ja.length ? '<div class="aviso"><span><b>' + ja.length + "</b> módulo(s) já terminaram no cronograma e ainda não têm nota: " + ja.map(function (m) { return esc(m.codigo); }).join(", ") + '.</span><button data-act="terminar-todos">Marcar como terminados</button></div>' : "";
+
+    $("secoes").innerHTML = aviso +
+      "<h2>Terminados, à espera de nota <span class=\"count\">" + ter.length + "</span></h2>" + (ter.length ? '<div class="grid">' + ter.map(cardTerminado).join("") + "</div>" : '<div class="vazio">Nenhum por agora. Quando um módulo acabar e a nota ainda não estiver lançada, marca-o como terminado para guardares a nota provisória.</div>') +
+      secaoLista("Por cursar", por, "Tudo cursado.") +
+      secaoLista("Com nota", com, "Ainda sem notas lançadas.") +
+      '<h2>Fase final</h2><div class="card fpct"><div class="nome">FPCT · Formação Prática em Contexto de Trabalho</div><div class="tags"><span class="tag">maio de 2027</span><span class="tag">15 créditos</span><span class="tag">fim previsto do curso: ' + fd(window.DADOS_INICIAIS.fimCurso) + '</span></div><div style="color:var(--muted)">Sem nota nem peso na média por enquanto.</div></div>';
+
+    ultimo = null;
+    if (focarAberto) { focarAberto = false; var inp = document.querySelector(".item.aberto form input"); if (inp) inp.focus(); }
+    if (obs) { obs.disconnect(); var hm = $("heroMain"); if (hm) obs.observe(hm); }
+  }
+
+  // ---- lançamento rápido ----
+  function estadoTxt(m) { return m.estado === "com-nota" ? "nota " + m.nota : m.estado === "terminado" ? "terminado" : "sem nota"; }
+  function fecharSug() { $("sug").hidden = true; $("q").setAttribute("aria-expanded", "false"); }
+  function mostrarSug() {
+    var r = Notas.procurarModulos(state.cet, $("q").value, 6), ul = $("sug");
+    if (!r.length || sel) { fecharSug(); return; }
+    ul.innerHTML = r.map(function (m) { return '<li><button type="button" data-sug="' + esc(m.codigo) + '"><span class="cod">' + esc(m.codigo) + '</span><span class="nome">' + esc(m.nome) + '</span><span class="st">' + estadoTxt(m) + "</span></button></li>"; }).join("");
+    ul.hidden = false; $("q").setAttribute("aria-expanded", "true");
+  }
+  function escolher(cod) {
+    var m = achar(cod); if (!m) return;
+    sel = cod; $("q").value = m.codigo + " · " + m.nome; fecharSug(); $("qn").focus();
+  }
+
+  // ---- eventos ----
+  document.addEventListener("submit", function (e) {
+    if (e.target.id === "form-cofre") { e.preventDefault(); submeterCofre(e.target); return; }
+    if (e.target.id === "rapido") {
+      e.preventDefault();
+      var cod = sel;
+      if (!cod) { var r = Notas.procurarModulos(state.cet, $("q").value, 2); if (r.length === 1) cod = r[0].codigo; }
+      if (!cod) { toast("Escolhe um módulo da lista."); $("q").focus(); return; }
+      if (lancar(cod, $("qn").value)) { $("q").value = ""; $("qn").value = ""; sel = null; $("q").focus(); } else { $("qn").focus(); }
+      return;
+    }
+    var f = e.target.closest("form[data-act='lancar']"); if (!f) return;
+    e.preventDefault(); lancar(f.getAttribute("data-cod"), f.querySelector("input").value);
+  });
+  document.addEventListener("click", function (e) {
+    var s = e.target.closest("button[data-sug]");
+    if (s) { escolher(s.getAttribute("data-sug")); return; }
+    if (!e.target.closest(".combo")) fecharSug();
+    var b = e.target.closest("button[data-act]"); if (!b) return;
+    var act = b.getAttribute("data-act"), cod = b.getAttribute("data-cod");
+    if (act === "terminar") setEstado(cod, "terminado", "Marcado como terminado.");
+    else if (act === "voltar") setEstado(cod, "por-cursar", "Voltou a por cursar.");
+    else if (act === "anular") setEstado(cod, "por-cursar", "Nota anulada.");
+    else if (act === "abrir") { aberto = aberto === cod ? null : cod; focarAberto = aberto !== null; render(); }
+    else if (act === "terminar-todos") terminarTodos();
+    else if (act === "alvo") { state.alvo = Number(b.getAttribute("data-alvo")); guardarEstado(); render(); }
+  });
+  document.addEventListener("change", function (e) {
+    if (e.target.classList && e.target.classList.contains("prov")) setProvisoria(e.target.getAttribute("data-cod"), e.target.value);
+  });
+  document.addEventListener("input", function (e) {
+    if (e.target.id === "hip") { hip = Number(e.target.value); atualizarHip(); }
+    else if (e.target.id === "q") { sel = null; mostrarSug(); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { fecharSug(); if (aberto) { aberto = null; render(); } return; }
+    var ul = $("sug"); if (ul.hidden) return;
+    var bs = Array.prototype.slice.call(ul.querySelectorAll("button")), i = bs.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" && (e.target.id === "q" || i >= 0)) { e.preventDefault(); (bs[i + 1] || bs[0]).focus(); }
+    else if (e.key === "ArrowUp" && i >= 0) { e.preventDefault(); if (i === 0) $("q").focus(); else bs[i - 1].focus(); }
+  });
+  $("repor").addEventListener("click", function () {
+    if (!window.confirm("Apagar TODAS as notas (CET e PRI)? A alteração é gravada e só podes recuperar as notas importando um backup.")) return;
+    state = estadoInicial(); aberto = null; guardarEstado(); render(); toast("Dados iniciais repostos.");
+  });
+  $("exportar").addEventListener("click", function () {
+    var blob = new Blob([Notas.exportar(state)], { type: "application/json" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "notas-cet-" + hoje() + ".json";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    toast("Backup exportado. Atenção: este ficheiro NÃO está cifrado.");
+  });
+  $("importar").addEventListener("click", function () { $("ficheiro").click(); });
+  $("ficheiro").addEventListener("change", function () {
+    var f = this.files && this.files[0]; this.value = ""; if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      var base = estadoInicial(), imp = Notas.importar(String(rd.result), base.cet, base.pri);
+      if (!imp) { toast("Ficheiro inválido: não é um backup desta página."); return; }
+      var n = Notas.mediaBloco(imp.cet), np = Notas.mediaBloco(imp.pri);
+      if (!window.confirm("Substituir as notas atuais pelas do backup (CET: " + (n ? n.n : 0) + " módulos com nota; PRI: " + (np ? np.n : 0) + ")?")) return;
+      state.cet = imp.cet; state.pri = imp.pri; state.alvo = imp.alvo; aberto = null; guardarEstado(); render(); toast("Backup importado e cifrado.");
+    };
+    rd.readAsText(f);
+  });
+
+  if ("IntersectionObserver" in window) obs = new IntersectionObserver(function (es) { $("mini").hidden = es[0].isIntersecting; }, { threshold: 0 });
+  state = estadoInicial();
+  $("bloquear").addEventListener("click", function () { try { sessionStorage.removeItem(CHAVE_SESSAO); } catch (e) { /* ignora */ } location.reload(); });
+  $("mudar-senha").addEventListener("click", function () { $("ns1").value = ""; $("ns2").value = ""; $("ns-erro").textContent = ""; $("dlg-senha").showModal(); $("ns1").focus(); });
+  $("ns-cancelar").addEventListener("click", function () { $("dlg-senha").close(); });
+  $("ns-guardar").addEventListener("click", function () {
+    var a = $("ns1").value, b = $("ns2").value;
+    if (a.length < 8) { $("ns-erro").textContent = "A password tem de ter pelo menos 8 caracteres."; return; }
+    if (a !== b) { $("ns-erro").textContent = "As passwords não coincidem."; return; }
+    Cofre.novo(a).then(function (se) { sessao = se; guardarSessao(); guardarEstado(); $("dlg-senha").close(); toast("Password alterada e notas recifradas."); });
+  });
+  armazem.carregar("notas", null).then(function (r) {
+    var d = r.dados;
+    if (Cofre.ehEnvelope(d)) {
+      envAtual = d;
+      return tentarSessao(d).then(function (t) {
+        if (t) { sessao = t.se; abrirNotas(estadoDeDados(t.payload)); } else mostrarCofre("bloqueado");
+      });
+    }
+    if (d && typeof d === "object" && Array.isArray(d.cet)) { legado = d; mostrarCofre("migrar"); } else mostrarCofre("primeira-vez");
+  });
+  armazem.carregar("agenda", { eventos: [] }).then(function (r) { agenda = r.dados; render(); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+/* tema de outono (só no calendário) */
+:root {
+  --bg: #faf6ef; --soft: #f2ebdf; --line: #e6dccb; --muted: #7a6a58; --text: #2b2118;
+  --accent: #b8500f; --accent-soft: #fbeedd;
+  --warn: #8a5a00; --warnbg: #f9eed3; --warnline: #e8d4a0;
+}
+/* cores por módulo: tons escuros de outono */
+.c0 { --cor: #b8500f; } /* laranja escuro */
+.c1 { --cor: #9b2226; } /* vermelho escuro */
+.c2 { --cor: #2f5d3a; } /* verde escuro */
+.c3 { --cor: #1f4e79; } /* azul escuro */
+.c4 { --cor: #8a6a0a; } /* mostarda */
+.c5 { --cor: #6b4423; } /* castanho */
+.c6 { --cor: #6d2133; } /* vinho */
+.c7 { --cor: #5c6b2f; } /* oliva */
+.c8 { --cor: #1f5f63; } /* petróleo */
+.c9 { --cor: #5b3a5e; } /* ameixa */
+.cn { --cor: #57534e; }
+.cor { color: var(--cor); background: color-mix(in srgb, var(--cor) 13%, transparent); border-left: 3px solid var(--cor); }
+
+.wrap.larga { max-width: 1280px; }
+.barra { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
+.barra .nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.barra h1 { font-size: 1.25rem; margin: 0 0 0 8px; }
+.grupo { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.grupo button { border: 0; border-radius: 0; }
+.grupo button + button { border-left: 1px solid var(--line); }
+.camadas { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.camadas button { border-radius: 99px; min-height: 32px; padding: 2px 12px; font-size: .82rem; color: var(--muted); }
+.camadas button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.layout { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 1000px) { .layout { grid-template-columns: 1fr 280px; } }
+.layout > main, .layout > aside { min-width: 0; }
+.lateral { display: grid; gap: 16px; }
+.lateral h2 { margin: 0 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.prazo { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--line); font-size: .88rem; }
+.prazo:first-of-type { border-top: 0; }
+.prazo input { margin-top: 4px; }
+.prazo .quando { color: var(--muted); font-size: .78rem; display: block; }
+.prazo button { all: unset; cursor: pointer; text-align: left; flex: 1; }
+.hoje-lista { font-size: .88rem; display: grid; gap: 6px; }
+
+/* mês */
+.mes { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.mes .cab, .semana-linha { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.mes .cab div { padding: 6px 8px; font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--line); }
+.dia { min-height: 112px; padding: 4px 6px 6px; border-top: 1px solid var(--line); border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; cursor: pointer; overflow: hidden; }
+.dia:nth-child(7n + 1) { border-left: 0; }
+.semana-linha:first-of-type .dia { border-top: 0; }
+.dia:hover { background: var(--soft); }
+.dia.fora { opacity: .5; }
+.dia.fds { background: color-mix(in srgb, var(--soft) 60%, transparent); }
+.dia.ferias { background: var(--warnbg); }
+.dia.feriado { background: color-mix(in srgb, #9b2226 10%, var(--card)); }
+.dia .num { font-size: .82rem; color: var(--muted); font-weight: 600; }
+.dia.hoje .num { color: var(--bg); background: var(--accent); border-radius: 99px; padding: 0 7px; align-self: flex-start; }
+.rotulo { font-size: .7rem; line-height: 1.2; }
+.rotulo.feriado { color: #9b2226; font-weight: 600; }
+.rotulo.ferias { color: var(--warn); }
+.marco, .ev, .uc { font-size: .72rem; line-height: 1.25; padding: 1px 5px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.marco { border: 1px dashed currentColor; background: transparent; border-left-width: 1px; }
+.ucs { display: flex; flex-wrap: wrap; gap: 3px; }
+.uc { display: inline-block; max-width: 100%; }
+.uc.previsto { border-left-style: dashed; opacity: .85; }
+.ev { text-align: left; width: 100%; min-height: 0; border-top: 0; border-right: 0; border-bottom: 0; font: inherit; font-size: .72rem; cursor: pointer; }
+.ev.feito { text-decoration: line-through; opacity: .55; }
+@media (max-width: 700px) {
+  .dia { min-height: 64px; padding: 2px 3px; }
+  .rotulo, .marco { display: none; }
+  .uc { font-size: 0; width: 7px; height: 7px; padding: 0; border-radius: 50%; border: 0; background: var(--cor); }
+  .ucs { gap: 2px; }
+  .ev { font-size: .65rem; padding: 0 3px; }
+}
+
+/* semana */
+.sem-info { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: .85rem; color: var(--muted); }
+.sem-info .aviso-novo { background: var(--warnbg); border: 1px solid var(--warnline); color: var(--warn); border-radius: 8px; padding: 4px 10px; }
+.semana { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; }
+.semana .grelha { display: grid; grid-template-columns: 46px repeat(7, minmax(112px, 1fr)); min-width: 860px; }
+.semana .cabd { padding: 8px 6px; border-bottom: 1px solid var(--line); border-left: 1px solid var(--line); font-size: .82rem; cursor: pointer; background: var(--card); }
+.semana .cabd b { display: block; }
+.semana .cabd.hoje b { color: var(--accent); }
+.semana .cabd small { display: block; font-size: .68rem; line-height: 1.2; min-height: 1.2em; }
+.semana .cabd small.feriado { color: #9b2226; font-weight: 600; }
+.semana .cabd small.ferias { color: var(--warn); }
+.semana .prazos { border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px; display: grid; gap: 3px; align-content: start; min-height: 30px; }
+.semana .rot { font-size: .68rem; color: var(--muted); padding: 4px; border-bottom: 1px solid var(--line); }
+.semana .horas { position: relative; }
+.semana .horas span { position: absolute; left: 0; right: 4px; font-size: .68rem; color: var(--muted); text-align: right; transform: translateY(-50%); }
+.semana .col { position: relative; border-left: 1px solid var(--line); }
+.semana .col.fds { background: color-mix(in srgb, var(--soft) 60%, transparent); }
+.semana .linha-h { position: absolute; left: 0; right: 0; border-top: 1px dotted var(--line); pointer-events: none; }
+.bloco { position: absolute; left: 3px; right: 3px; border-radius: 6px; padding: 3px 6px; overflow: hidden; font-size: .74rem; line-height: 1.3; cursor: pointer; text-align: left; font: inherit; font-size: .74rem; min-height: 0; border-top: 0; border-right: 0; border-bottom: 0; }
+.bloco b { display: block; font-weight: 650; }
+.bloco small { display: block; opacity: .85; }
+.bloco.previsto { border-left-style: dashed; background-image: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--cor) 8%, transparent) 6px 12px); }
+.vazio-sem { padding: 28px; text-align: center; color: var(--muted); grid-column: 1 / -1; }
+
+/* diálogos */
+.campos { display: grid; gap: 10px; }
+.campos .par { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.campos label { display: grid; gap: 3px; font-size: .78rem; color: var(--muted); }
+.campos input:not([type="checkbox"]), .campos select, .campos textarea { font: inherit; font-size: .9rem; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 40px; width: 100%; min-width: 0; }
+.campos label.cb { display: flex; gap: 8px; align-items: center; font-size: .9rem; color: var(--text); }
+.erro-dlg { color: var(--warn); font-size: .85rem; min-height: 1.2em; }
+.legenda-cores { display: flex; flex-wrap: wrap; gap: 4px; }
+.legenda-cores .uc { font-size: .68rem; }
+
+.hs { padding: 5px 8px; border-radius: 6px; font-size: .82rem; line-height: 1.3; }
+.hs.previsto { border-left-style: dashed; }
+
+.selo { margin: 0; text-align: center; }
+.selo img { width: 100%; max-width: 240px; height: auto; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+
+/* ===== mês: tabuleiro de azulejos com autocolantes ===== */
+.mes { background: #1d140d; border: 0; border-radius: 28px; padding: 14px; overflow: visible; }
+.mes .cab { gap: 6px; margin-bottom: 6px; }
+.mes .cab div { border: 0; padding: 2px 10px; color: #cdbb97; font-weight: 800; letter-spacing: .08em; }
+.semana-linha { gap: 6px; margin-bottom: 6px; }
+.semana-linha:last-child { margin-bottom: 0; }
+.dia { position: relative; background: #fbf3df; color: #1d140d; border: 0 !important; border-radius: 16px; min-height: 124px; padding: 8px 10px; overflow: visible; gap: 5px; transition: transform .12s ease; }
+.dia:hover { background: #fff7e6; transform: translateY(-2px); }
+.dia.fds { background: #eadcb8; }
+.dia.fora { background: transparent; pointer-events: none; }
+.dia.fora > * { display: none; }
+.dia.hoje { box-shadow: 0 0 0 3px #f2b84b; }
+.dia .num { font-size: 1.6rem; font-weight: 900; line-height: 1; color: #1d140d; background: none; padding: 0; border-radius: 0; align-self: flex-start; }
+.dia.hoje .num { color: #b8500f; background: none; padding: 0; }
+.dia.especial { background: var(--cor); color: #fff; }
+.dia.especial:hover { background: var(--cor); filter: brightness(1.1); }
+.dia.especial .num { color: #fff; }
+.t-feriado { --cor: #9b2226; }
+.t-ferias { --cor: #d6a21c; }
+.dia.t-ferias, .dia.t-ferias .num { color: #1d140d; }
+.dia .tit { margin-top: auto; font-weight: 900; font-size: .72rem; line-height: 1.08; text-transform: uppercase; max-width: 78%; }
+.sticker { position: absolute; right: -8px; top: -12px; width: 50px; height: 50px; padding: 9px; background: #fff; color: var(--cor); border-radius: 14px; transform: rotate(7deg); box-shadow: 0 3px 0 rgba(0,0,0,.3); z-index: 2; }
+.ic { display: block; width: 100%; height: 100%; }
+.dia .uc .ic { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 3px; }
+.bloco .ic { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; }
+.dia .uc, .dia .ev { font-weight: 800; }
+.dia .ev { text-transform: uppercase; letter-spacing: .01em; }
+.dia.especial .uc, .dia.especial .ev, .dia.especial .rotulo { background: rgba(255,255,255,.2); color: #fff; border-left-color: #fff; }
+.dia.t-ferias .uc, .dia.t-ferias .ev, .dia.t-ferias .rotulo { background: rgba(29,20,13,.12); color: #1d140d; border-left-color: #1d140d; }
+.dia .rotulo.marco-txt { font-weight: 800; text-transform: uppercase; color: inherit; opacity: .9; }
+@media (max-width: 700px) {
+  .mes { padding: 8px; border-radius: 18px; }
+  .semana-linha, .mes .cab { gap: 3px; }
+  .dia { min-height: 58px; padding: 4px 5px; border-radius: 10px; }
+  .dia .num { font-size: 1rem; }
+  .dia .tit { display: none; }
+  .sticker { width: 22px; height: 22px; padding: 3px; right: 2px; top: 2px; border-radius: 7px; transform: none; box-shadow: none; }
+  .dia .uc .ic { display: none; }
+}
+.dia .ucs { display: flex; flex-direction: column; gap: 3px; margin-top: auto; }
+.dia .ucs .uc { display: block; width: 100%; font-size: .66rem; letter-spacing: 0; }
+.dia .tit + .ucs, .dia .rotulo + .ucs { margin-top: 2px; }
+@media (max-width: 700px) { .dia .ucs { flex-direction: row; flex-wrap: wrap; gap: 2px; } .dia .ucs .uc { width: 7px; } }
+.dia.fora, .dia.fora.especial { background: transparent; box-shadow: none; filter: none; transform: none; }
+.dia.fora > *, .dia.fora .ucs, .dia.fora .uc, .dia.fora .ev { display: none !important; }
+@media (max-width: 700px) {
+  .dia .num { font-size: .95rem; }
+  .sticker { width: 18px; height: 18px; padding: 2px; right: 1px; top: 1px; }
+  .dia.especial .ucs { display: none; }
+}
+
+/* ===== fundo mostarda (contraste) ===== */
+:root { --bg: #dcae3c; --soft: #ebc972; --line: #c99b30; --muted: #5a4220; --text: #2a1d0e; }
+
+/* moldura roxa escura à volta do selo */
+.selo { text-align: center; }
+.moldura { display: inline-block; max-width: 260px; padding: 12px; background: #3b1f4d; border: 3px solid #5a3a72; border-radius: 18px; box-shadow: 0 6px 0 #26122f, 0 14px 26px rgba(0,0,0,.28); }
+.moldura img { display: block; width: 100%; height: auto; border-radius: 8px; box-shadow: none; max-width: none; }
+
+/* descrição breve das UC */
+.dia .ucs .uc { padding: 2px 5px; line-height: 1.15; }
+.dia .uc b { font-weight: 700; }
+.dia .uc small { display: block; font-size: .62rem; font-weight: 400; opacity: .92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dia .tit b { display: block; }
+.dia .tit small { display: block; font-size: .64rem; font-weight: 400; text-transform: none; opacity: .95; }
+@media (max-width: 700px) { .dia .uc small { display: none; } }
+
+/* ===== altura uniforme dos azulejos ===== */
+:root { --alt: 150px; }
+.semana-linha { grid-auto-rows: var(--alt); }
+.dia { height: var(--alt); min-height: 0; }
+.dia .corpo { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 3px; }
+
+/* autocolantes com imagem */
+.sticker { width: 66px; height: 66px; padding: 4px; right: -10px; top: -14px; }
+.sticker img { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 10px; }
+
+/* fundo mostarda um pouco mais escuro */
+:root { --bg: #cf9f2e; --soft: #dbb04c; --line: #b98a22; }
+
+/* molduras roxas nos cartões da direita */
+.lateral .panel { background: #fffaf0; border: 7px solid #3b1f4d; border-radius: 18px; box-shadow: inset 0 0 0 2px #5a3a72, 0 6px 0 #26122f; padding: 14px 16px; }
+.moldura { box-shadow: inset 0 0 0 2px #5a3a72, 0 6px 0 #26122f, 0 14px 26px rgba(0,0,0,.28); }
+
+/* botões das camadas: castanho, menos destacados */
+.camadas button { background: #6b4a2b; color: #f3e4c4; border: 1px solid #4a321c; }
+.camadas button[aria-pressed="true"] { background: #4e3320; color: #f6ead0; border-color: #3a2514; font-weight: 700; }
+.camadas button[aria-pressed="false"] { background: #a8844f; color: #f6ead0; border-color: #8f6f3f; opacity: .85; }
+.camadas button:hover { border-color: #f3e4c4; }
+
+@media (max-width: 700px) {
+  :root { --alt: 58px; }
+  .sticker { width: 26px; height: 26px; padding: 2px; right: -3px; top: -4px; border-radius: 8px; }
+  .sticker img { border-radius: 5px; }
+}
+
+/* autocolante recortado */
+.sticker { overflow: visible; }
+.sticker .pic { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; border-radius: 10px; }
+.sticker .pic img { position: absolute; max-width: none; height: auto; display: block; border-radius: 0; }
+@media (max-width: 700px) { .sticker .pic { border-radius: 5px; } }
+@media (max-width: 700px) { .sticker { right: -8px; top: -8px; } }
+
+/* fundo branco em todos os autocolantes */
+.sticker, .sticker .pic { background: #fff; }
+
+/* ===== cabe no ecrã sem rolar: a altura dos azulejos depende da altura da janela ===== */
+.wrap.larga { padding-top: 12px; padding-bottom: 16px; }
+.mes { --alt: clamp(72px, calc((100vh - 292px) / var(--linhas, 6) - 6px), 150px); }
+.dia .num { font-size: 1.45rem; }
+
+/* autocolantes e selo mais pequenos */
+.sticker { width: 52px; height: 52px; padding: 3px; right: -8px; top: -10px; border-radius: 12px; }
+.moldura { max-width: 190px; padding: 9px; }
+.lateral .panel { padding: 10px 14px; }
+
+/* etiquetas das UC numa só linha: código · descrição */
+.dia .ucs .uc { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dia .uc b, .dia .uc small { display: inline; white-space: inherit; overflow: visible; font-size: inherit; }
+.dia .uc small { font-weight: 400; opacity: .95; }
+.dia .uc small::before { content: " · "; }
+.dia .tit small { display: none; }
+
+@media (max-width: 700px) {
+  .mes { --alt: 58px; }
+  .dia .num { font-size: .95rem; }
+  .sticker { width: 24px; height: 24px; padding: 2px; right: -8px; top: -8px; }
+  .dia .uc small { display: none; }
+}
+
+/* ===== descrição das UC por baixo do código, visível ===== */
+.dia { padding: 5px 8px 6px; gap: 2px; }
+.dia .num { font-size: 1.3rem; }
+.dia .corpo { gap: 2px; }
+.dia .ucs { gap: 2px; }
+.dia .ucs .uc { padding: 1px 5px 2px; line-height: 1.15; white-space: normal; }
+.dia .uc b { display: block; font-size: .66rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dia .uc b .ic { width: 11px; height: 11px; margin-right: 3px; }
+.dia .uc small { display: block; font-size: .66rem; font-weight: 400; opacity: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dia .uc small::before { content: none; }
+.dia .tit small { display: block; font-size: .64rem; font-weight: 400; text-transform: none; opacity: 1; }
+.dia .tit { max-width: 100%; }
+@media (max-width: 700px) {
+  .dia { padding: 4px 5px; }
+  .dia .uc small, .dia .uc b { display: none; }
+}

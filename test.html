@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<title>Testes</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+  .pass { color: #0a7d32; } .fail { color: #c0182b; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1 id="titulo">A correr…</h1>
+<ul id="out"></ul>
+<script src="js/dados-cet.js"></script>
+<script src="js/notas-logic.js"></script>
+<script src="js/armazem.js"></script>
+<script src="js/cofre.js"></script>
+<script src="js/agenda-logic.js"></script>
+<script src="js/icones.js"></script>
+<script>
+  var falhas = 0, out = document.getElementById("out"), pendentes = [];
+  function ta(nome, fn) {
+    var li = document.createElement("li");
+    out.appendChild(li);
+    var p = Promise.resolve().then(fn).then(
+      function () { li.className = "pass"; li.textContent = "PASS  " + nome; },
+      function (e) { falhas++; li.className = "fail"; li.textContent = "FAIL  " + nome + " — " + e.message; }
+    );
+    pendentes.push(p);
+  }
+  function t(nome, fn) {
+    var li = document.createElement("li");
+    try { fn(); li.className = "pass"; li.textContent = "PASS  " + nome; }
+    catch (e) { falhas++; li.className = "fail"; li.textContent = "FAIL  " + nome + " — " + e.message; }
+    out.appendChild(li);
+  }
+  function eq(a, b, msg) { if (a !== b) throw new Error((msg || "") + " esperado " + JSON.stringify(b) + ", obtido " + JSON.stringify(a)); }
+  function perto(a, b, msg) { if (Math.abs(a - b) > 0.005) throw new Error((msg || "") + " esperado ≈" + b + ", obtido " + a); }
+  function copia(o) { return JSON.parse(JSON.stringify(o)); }
+
+  // Notas INVENTADAS só para testar os cálculos (as notas reais não estão em nenhum ficheiro público).
+  function fixo() {
+    var d = copia(DADOS_INICIAIS);
+    var gc = { UC00245: 15, UC00606: 14, UC01481: 13, UC00598: 16, UC01490: 12, UC01488: 13, UC01485: 14, UC00627: 15, UC00602: 16 };
+    d.cet.forEach(function (m) { if (gc[m.codigo] !== undefined) { m.estado = "com-nota"; m.nota = gc[m.codigo]; } });
+    var gp = [12, 13, 14, 15, 16, 12, 13, 14, 15, 17, 12, 13, 14, 15, 16];
+    d.pri.forEach(function (m, i) { m.estado = "com-nota"; m.nota = gp[i]; });
+    return d;
+  }
+  var FIX = fixo();
+
+  t("dados iniciais", function () {
+    var d = window.DADOS_INICIAIS;
+    eq(d.pri.length, 15, "PRI");
+    eq(d.cet.length, 27, "CET");
+    eq(d.cet.filter(function (x) { return x.tipo === "opcional"; }).length, 5, "opcionais");
+  });
+
+  t("dados públicos não têm notas (estão só no ficheiro cifrado)", function () {
+    var d = window.DADOS_INICIAIS;
+    d.cet.concat(d.pri).forEach(function (m) {
+      eq(m.nota, null, m.codigo + " tem nota no código público");
+      eq(m.notaDecimal, null, m.codigo + " tem nota decimal no código público");
+      eq(m.estado, "por-cursar", m.codigo);
+    });
+  });
+
+  t("normalizarNota", function () {
+    var n = Notas.normalizarNota;
+    eq(n("18,5"), 19); eq(n(18.4), 18); eq(n("x"), null); eq(n(""), null);
+    eq(n(21), null); eq(n(-1), null); eq(n(20), 20); eq(n(0), 0);
+    eq(n(null), null); eq(n(undefined), null); eq(n(NaN), null);
+  });
+
+  t("mediaBloco PRI", function () {
+    var r = Notas.mediaBloco(FIX.pri);
+    perto(r.decimal, 211 / 15); eq(r.arredondada, 14); eq(r.n, 15);
+  });
+
+  t("mediaBloco CET", function () {
+    var r = Notas.mediaBloco(FIX.cet);
+    perto(r.decimal, 128 / 9); eq(r.arredondada, 14); eq(r.n, 9);
+  });
+
+  t("mediaBloco vazio", function () {
+    eq(Notas.mediaBloco([]), null);
+    var sem = copia(FIX.cet).map(function (x) { x.estado = "por-cursar"; x.nota = null; return x; });
+    eq(Notas.mediaBloco(sem), null);
+  });
+
+  t("mediaProjetada não contamina a oficial", function () {
+    var cet = copia(FIX.cet);
+    var alvo = cet.filter(function (x) { return x.codigo === "UC00635"; })[0];
+    alvo.estado = "terminado"; alvo.provisoria = 20;
+    var p = Notas.mediaProjetada(cet), o = Notas.mediaBloco(cet);
+    eq(p.n, 10); perto(p.decimal, 14.8);
+    eq(o.n, 9); perto(o.decimal, 128 / 9);
+  });
+
+  t("mediaProjetada ignora provisória inválida", function () {
+    var cet = copia(FIX.cet);
+    var alvo = cet.filter(function (x) { return x.codigo === "UC00635"; })[0];
+    alvo.estado = "terminado"; alvo.provisoria = 99;
+    eq(Notas.mediaProjetada(cet).n, 9);
+  });
+
+  t("necessarioParaMedia", function () {
+    var r15 = Notas.necessarioParaMedia(FIX.cet, 15);
+    eq(r15.restantes, 18); eq(r15.possivel, true); eq(r15.notaMediaNecessaria, 15);
+    var r16 = Notas.necessarioParaMedia(FIX.cet, 16);
+    eq(r16.possivel, true); eq(r16.notaMediaNecessaria, 17);
+    var r20 = Notas.necessarioParaMedia(FIX.cet, 20);
+    eq(r20.possivel, false); eq(r20.notaMediaNecessaria, null);
+    var cheio = copia(FIX.cet).map(function (x) { x.estado = "com-nota"; x.nota = 18; return x; });
+    var rf = Notas.necessarioParaMedia(cheio, 19);
+    eq(rf.restantes, 0); eq(rf.notaMediaNecessaria, null); eq(rf.possivel, false);
+    var rf2 = Notas.necessarioParaMedia(cheio, 18);
+    eq(rf2.possivel, true);
+  });
+
+  t("necessarioParaMedia impossível", function () {
+    var cet = copia(DADOS_INICIAIS.cet).map(function (x) { x.estado = "por-cursar"; x.nota = null; return x; });
+    for (var i = 0; i < 10; i++) { cet[i].estado = "com-nota"; cet[i].nota = 10; }
+    var r = Notas.necessarioParaMedia(cet, 20); // (100 + 17*20)/27 = 16,3 < 19,5
+    eq(r.possivel, false); eq(r.notaMediaNecessaria, null);
+  });
+
+  t("formatar", function () {
+    eq(Notas.formatar(18.78), "18,78"); eq(Notas.formatar(20), "20,00");
+    eq(Notas.formatar(null), "—");
+  });
+
+  function mod(cod) { return copia(DADOS_INICIAIS.cet).filter(function (x) { return x.codigo === cod; })[0]; }
+
+  t("datas do cronograma", function () {
+    var c = DADOS_INICIAIS.cet;
+    eq(c.filter(function (m) { return !m.inicio || !m.fim; }).length, 0, "módulos sem datas");
+    eq(mod("UC00631").fim, "2026-11-16"); eq(mod("UC01476").inicio, "2026-12-02");
+    eq(mod("UC01487").fim, "2027-05-17");
+    c.forEach(function (m) { if (m.inicio > m.fim) throw new Error(m.codigo + " início depois do fim"); });
+  });
+
+  t("margemLimiares", function () {
+    var m = Notas.margemLimiares(18.78);
+    eq(m.arredondada, 19); perto(m.acima, 0.28); perto(m.falta, 0.72); eq(m.seguinte, 20);
+    var v = Notas.margemLimiares(20);
+    eq(v.arredondada, 20); eq(v.falta, null); eq(v.seguinte, null);
+    eq(Notas.margemLimiares(null), null);
+  });
+
+  t("mediaSeTirar", function () {
+    var r = Notas.mediaSeTirar(FIX.cet, 19);
+    perto(r.decimal, 470 / 27); eq(r.arredondada, 17);
+    var r15 = Notas.mediaSeTirar(FIX.cet, 15);
+    perto(r15.decimal, 398 / 27); eq(r15.arredondada, 15);
+    eq(Notas.mediaSeTirar(FIX.cet, 25), null);
+    eq(Notas.mediaSeTirar(FIX.cet, "x"), null);
+  });
+
+  t("evolucao ordena pelo fim do módulo", function () {
+    var e = Notas.evolucao(FIX.cet);
+    eq(e.length, 9); eq(e[0].codigo, "UC00245"); eq(e[0].nota, 15); perto(e[0].media, 15);
+    perto(e[1].media, 15);
+    perto(e[e.length - 1].media, 128 / 9);
+    eq(Notas.evolucao([]).length, 0);
+  });
+
+  t("distribuicao", function () {
+    var d = Notas.distribuicao(FIX.cet);
+    eq(d[16], 2); eq(d[15], 2); eq(d[14], 2); eq(d[13], 2); eq(d[12], 1); eq(d[20] || 0, 0);
+  });
+
+  t("procurarModulos", function () {
+    var c = DADOS_INICIAIS.cet, p = Notas.procurarModulos;
+    eq(p(c, "00635")[0].codigo, "UC00635");
+    eq(p(c, "uc01476")[0].codigo, "UC01476");
+    eq(p(c, "redes locais")[0].codigo, "UC00631");
+    eq(p(c, "CIBERSEGURANCA").length > 2, true, "sem acentos e sem maiúsculas");
+    eq(p(c, "zzz").length, 0); eq(p(c, "").length, 0);
+    eq(p(c, "a", 3).length <= 3, true, "limite");
+  });
+
+  t("estadoTemporal", function () {
+    var m = { inicio: "2026-11-04", fim: "2026-12-02" };
+    eq(Notas.estadoTemporal(m, "2026-11-18"), "a-decorrer");
+    eq(Notas.estadoTemporal(m, "2026-12-03"), "terminou");
+    eq(Notas.estadoTemporal(m, "2026-11-03"), "futuro");
+    eq(Notas.estadoTemporal(m, "2026-11-04"), "a-decorrer");
+    eq(Notas.estadoTemporal({ inicio: null, fim: null }, "2026-11-18"), null);
+  });
+
+  t("formatarData", function () {
+    eq(Notas.formatarData("2026-11-16", "2026-11-18"), "16 nov");
+    eq(Notas.formatarData("2027-01-18", "2026-11-18"), "18 jan 2027");
+    eq(Notas.formatarData(null, "2026-11-18"), "");
+  });
+
+  t("aplicarGuardado ignora lixo e aplica o válido", function () {
+    var base = copia(DADOS_INICIAIS.cet);
+    var r = Notas.aplicarGuardado(base, [
+      { codigo: "UC00635", estado: "com-nota", nota: "20", notaDecimal: 19.5 },
+      { codigo: "UC01476", estado: "xx", nota: 5 },
+      { codigo: "UC00631", estado: "com-nota", nota: "abc" },
+      { codigo: "UC00599", estado: "terminado", provisoria: 19 },
+      { codigo: "NAOEXISTE", estado: "com-nota", nota: 10 },
+      null, 7,
+    ]);
+    var g = function (c) { return r.filter(function (x) { return x.codigo === c; })[0]; };
+    eq(g("UC00635").estado, "com-nota"); eq(g("UC00635").nota, 20); eq(g("UC00635").notaDecimal, 19.5);
+    eq(g("UC01476").estado, "por-cursar"); eq(g("UC00631").estado, "por-cursar");
+    eq(g("UC00599").estado, "terminado"); eq(g("UC00599").provisoria, 19);
+    eq(r.length, 27);
+    eq(Notas.aplicarGuardado(base, "não é lista").length, 27);
+  });
+
+  t("exportar / importar", function () {
+    var cet = copia(DADOS_INICIAIS.cet);
+    var m = cet.filter(function (x) { return x.codigo === "UC00635"; })[0];
+    m.estado = "com-nota"; m.nota = 20; m.notaDecimal = null;
+    var txt = Notas.exportar({ cet: cet, alvo: 20 });
+    var imp = Notas.importar(txt, copia(DADOS_INICIAIS.cet));
+    eq(imp.alvo, 20);
+    eq(imp.cet.filter(function (x) { return x.codigo === "UC00635"; })[0].nota, 20);
+    eq(Notas.mediaBloco(imp.cet).n, 1);
+    eq(Notas.importar("isto não é json", copia(DADOS_INICIAIS.cet)), null);
+    eq(Notas.importar('{"versao":99,"cet":[]}', copia(DADOS_INICIAIS.cet)), null);
+    eq(Notas.importar('{"versao":1}', copia(DADOS_INICIAIS.cet)), null);
+    eq(Notas.importar('{"versao":1,"cet":[],"alvo":7}', copia(DADOS_INICIAIS.cet)).alvo, 19);
+  });
+
+  t("PRI: aplicarPri, exportar e importar", function () {
+    var base = copia(DADOS_INICIAIS.pri);
+    var r = Notas.aplicarPri(base, [{ codigo: "6190", nota: "19", notaDecimal: 19.1 }, { codigo: "6192", nota: "abc" }, { codigo: "XX", nota: 10 }, null, 7]);
+    var g = function (c) { return r.filter(function (x) { return x.codigo === c; })[0]; };
+    eq(g("6190").estado, "com-nota"); eq(g("6190").nota, 19); eq(g("6190").notaDecimal, 19.1);
+    eq(g("6192").estado, "por-cursar"); eq(r.length, 15);
+    eq(Notas.aplicarPri(base, "lixo").length, 15);
+    var txt = Notas.exportar({ cet: copia(FIX.cet), alvo: 19, pri: FIX.pri });
+    var bruto = JSON.parse(txt);
+    eq(bruto.pri.length, 15); eq(Object.keys(bruto.pri[0]).sort().join(), "codigo,nota,notaDecimal");
+    var imp = Notas.importar(txt, copia(DADOS_INICIAIS.cet), copia(DADOS_INICIAIS.pri));
+    eq(Notas.mediaBloco(imp.pri).n, 15); eq(Notas.mediaBloco(imp.cet).n, 9);
+    eq(Notas.importar(txt, copia(DADOS_INICIAIS.cet)).pri.length, 0, "sem base de PRI não aplica");
+  });
+
+  // ---- Armazem ----
+  function fakeStorage(init) {
+    var m = {}; for (var k in (init || {})) m[k] = init[k];
+    return { getItem: function (k) { return k in m ? m[k] : null; }, setItem: function (k, v) { m[k] = String(v); }, removeItem: function (k) { delete m[k]; }, _m: m };
+  }
+  function resp(status, body) {
+    return { ok: status >= 200 && status < 300, status: status, json: function () { return typeof body === "string" ? Promise.reject(new Error("json inválido")) : Promise.resolve(body); }, text: function () { return Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)); } };
+  }
+  function mk(rotas, storageInit) {
+    var calls = [];
+    var st = fakeStorage(storageInit);
+    var a = Armazem.criar({ repo: "u/r", branch: "main", storage: st, atraso: 0, agora: function () { return "2026-11-18T12:00:00.000Z"; },
+      fetch: function (url, opts) { calls.push({ url: url, opts: opts || {} }); return Promise.resolve(rotas(url, opts || {})); } });
+    return { a: a, calls: calls, st: st };
+  }
+  function estados(a) { var e = []; a.aoMudarEstado(function (x) { e.push(x); }); return e; }
+
+  t("armazem b64 e maisRecente", function () {
+    eq(Armazem.desb64(Armazem.b64('ação € "x"')), 'ação € "x"');
+    eq(Armazem.maisRecente({ atualizadoEm: "2026-01-02" }, { atualizadoEm: "2026-01-01" }).atualizadoEm, "2026-01-02");
+    eq(Armazem.maisRecente(null, { atualizadoEm: "x" }).atualizadoEm, "x");
+    eq(Armazem.maisRecente(null, null), null);
+  });
+
+  ta("armazem carregar sem token (remoto)", function () {
+    var m = mk(function () { return resp(200, { atualizadoEm: "2026-11-18T10:00:00Z", alvo: 19 }); });
+    return m.a.carregar("notas", { vazio: true }).then(function (r) {
+      eq(r.origem, "remoto"); eq(r.dados.alvo, 19); eq(r.pendente, false);
+      eq(m.calls[0].url.indexOf("data/notas.json?v="), 0, "url relativa com cache-bust");
+    });
+  });
+  ta("armazem carregar 404 e JSON corrompido dão vazio", function () {
+    var m1 = mk(function () { return resp(404, {}); });
+    var m2 = mk(function () { return resp(200, "isto não é json"); });
+    return Promise.all([m1.a.carregar("x", { v: 1 }), m2.a.carregar("x", { v: 2 })]).then(function (r) {
+      eq(r[0].origem, "vazio"); eq(r[0].dados.v, 1); eq(r[1].origem, "vazio"); eq(r[1].dados.v, 2);
+    });
+  });
+  ta("armazem carregar prefere cópia local pendente", function () {
+    var local = { dados: { atualizadoEm: "2026-11-18T11:00:00Z", alvo: 20 }, pendente: true };
+    var m = mk(function () { return resp(200, { atualizadoEm: "2026-11-18T10:00:00Z", alvo: 19 }); }, { "acad:notas": JSON.stringify(local) });
+    return m.a.carregar("notas", {}).then(function (r) { eq(r.origem, "local"); eq(r.dados.alvo, 20); eq(r.pendente, true); });
+  });
+  ta("armazem guardar com token: GET sha, PUT e estado guardado", function () {
+    var m = mk(function (url, o) {
+      if (o.method === "PUT") return resp(200, { content: { sha: "def" } });
+      return resp(200, { sha: "abc", content: Armazem.b64(JSON.stringify({ atualizadoEm: "2026-01-01T00:00:00Z" })) });
+    }, { "acad-token": "tok123" });
+    var e = estados(m.a);
+    return m.a.guardar("notas", { alvo: 19 }).then(function () {
+      var put = m.calls.filter(function (c) { return c.opts.method === "PUT"; })[0];
+      eq(!!put, true, "houve PUT"); eq(put.url.indexOf("https://api.github.com/repos/u/r/contents/data/notas.json"), 0);
+      var corpo = JSON.parse(put.opts.body);
+      eq(corpo.sha, "abc"); eq(corpo.branch, "main"); eq(typeof corpo.message, "string");
+      eq(JSON.parse(Armazem.desb64(corpo.content)).alvo, 19);
+      eq(JSON.parse(Armazem.desb64(corpo.content)).atualizadoEm, "2026-11-18T12:00:00.000Z");
+      eq(put.opts.headers.Authorization, "Bearer tok123");
+      eq(e[e.length - 1], "guardado");
+      eq(JSON.parse(m.st.getItem("acad:notas")).pendente, false);
+    });
+  });
+  ta("armazem PUT 409 dá conflito e mantém pendente", function () {
+    var m = mk(function (url, o) { return o.method === "PUT" ? resp(409, {}) : resp(200, { sha: "abc", content: Armazem.b64("{}") }); }, { "acad-token": "t" });
+    var e = estados(m.a);
+    return m.a.guardar("notas", { alvo: 19 }).then(function () {
+      eq(e[e.length - 1], "conflito"); eq(JSON.parse(m.st.getItem("acad:notas")).pendente, true);
+    });
+  });
+  ta("armazem sem token: sem-token, sem rede, cópia local mantida", function () {
+    var m = mk(function () { throw new Error("não devia chamar a rede"); });
+    var e = estados(m.a);
+    return m.a.guardar("notas", { alvo: 18 }).then(function () {
+      eq(e[e.length - 1], "sem-token"); eq(m.calls.length, 0);
+      var l = JSON.parse(m.st.getItem("acad:notas")); eq(l.pendente, true); eq(l.dados.alvo, 18);
+    });
+  });
+  ta("armazem repositório mais novo que o carregado: conflito sem PUT", function () {
+    var versao = "2026-11-18T10:00:00Z";
+    var m = mk(function (url, o) {
+      if (o.method === "PUT") return resp(200, { content: { sha: "z" } });
+      return resp(200, { sha: "s1", content: Armazem.b64(JSON.stringify({ atualizadoEm: versao })) });
+    }, { "acad-token": "t" });
+    var e = estados(m.a);
+    return m.a.carregar("notas", {}).then(function () {
+      versao = "2026-11-18T11:30:00Z"; // alguém gravou noutro dispositivo
+      return m.a.guardar("notas", { alvo: 19 });
+    }).then(function () {
+      eq(e[e.length - 1], "conflito");
+      eq(m.calls.filter(function (c) { return c.opts.method === "PUT"; }).length, 0);
+    });
+  });
+  ta("armazem token inválido (401) dá erro e mantém pendente", function () {
+    var m = mk(function () { return resp(401, {}); }, { "acad-token": "mau" });
+    var e = estados(m.a);
+    return m.a.guardar("notas", { alvo: 19 }).then(function () {
+      eq(e[e.length - 1], "erro"); eq(JSON.parse(m.st.getItem("acad:notas")).pendente, true);
+    });
+  });
+
+  // ---- Agenda ----
+  var CAL = null;
+  function carregarCal() { return CAL ? Promise.resolve(CAL) : fetch("data/calendario.json").then(function (r) { return r.json(); }).then(function (j) { CAL = j; return j; }); }
+
+  t("agenda datas e grelha do mês", function () {
+    eq(Agenda.segundaDaSemana("2026-11-22"), "2026-11-16"); eq(Agenda.segundaDaSemana("2026-11-16"), "2026-11-16");
+    eq(Agenda.somarDias("2026-12-31", 1), "2027-01-01"); eq(Agenda.somarDias("2027-03-01", -1), "2027-02-28");
+    var nov = Agenda.gradeMes(2026, 11);
+    eq(nov.length, 6); eq(nov[0][0], "2026-10-26"); eq(nov[5][6], "2026-12-06");
+    var dez = Agenda.gradeMes(2026, 12);
+    eq(dez.length, 5); eq(dez[0][0], "2026-11-30"); eq(dez[4][6], "2027-01-03");
+    nov.forEach(function (s) { eq(s.length, 7); });
+  });
+
+  t("agenda feriados móveis de 2027", function () {
+    var f = Agenda.feriadosDoAno(2027), por = {};
+    f.forEach(function (x) { por[x.nome] = x.data; });
+    eq(por["Páscoa"], "2027-03-28"); eq(por["Sexta-Feira Santa"], "2027-03-26");
+    eq(por["Carnaval"], "2027-02-09"); eq(por["Corpo de Deus"], "2027-05-27");
+    eq(por["Natal"], "2027-12-25"); eq(por["Feriado Municipal de Matosinhos"], "2027-05-26");
+    eq(Agenda.feriadosDoAno(2026).filter(function (x) { return x.nome === "Páscoa"; })[0].data, "2026-04-05");
+  });
+
+  ta("agenda sessões previstas e junção de faixas", function () {
+    return carregarCal().then(function (c) {
+      var seg = Agenda.sessoesPrevistas(c.aulas, c.faixas, "2026-11-16");
+      eq(seg.length, 3);
+      eq(seg[0].inicio + "-" + seg[0].fim + " " + seg[0].uc, "19:10-21:10 UC00631");
+      eq(seg[1].inicio + "-" + seg[1].fim + " " + seg[1].uc, "21:25-22:25 UC00631");
+      eq(seg[2].inicio + "-" + seg[2].fim + " " + seg[2].uc, "22:25-23:25 UC01478");
+      eq(seg[0].previsto, true);
+      var qua = Agenda.sessoesPrevistas(c.aulas, c.faixas, "2026-11-18");
+      eq(qua.length, 2); eq(qua[1].inicio + "-" + qua[1].fim, "21:25-23:25");
+      var h = Agenda.sessoesPrevistas(c.aulas, c.faixas, "2027-04-16");
+      eq(h.length, 2); eq(h[1].inicio + "-" + h[1].fim, "21:25-22:25");
+      eq(Agenda.sessoesPrevistas(c.aulas, c.faixas, "2026-08-12").length, 0, "férias");
+    });
+  });
+
+  ta("agenda sessões da semana: precedência e aviso de ficheiro mais novo", function () {
+    return carregarCal().then(function (c) {
+      var sess = function (u) { return [{ id: "a", data: "2026-11-16", inicio: "19:10", fim: "21:10", uc: u, local: "", formador: "" }]; };
+      var horario = { semanas: { "2026-11-16": { atualizadoEm: "2026-11-18", sessoes: sess("UC00631") } } };
+      var edits = { "2026-11-16": { baseAtualizadoEm: "2026-11-10", sessoes: sess("UC09999") } };
+      var base = { horario: horario, edits: {}, aulas: c.aulas, faixas: c.faixas };
+      var r1 = Agenda.sessoesDaSemana("2026-11-16", base); eq(r1.origem, "horario"); eq(r1.sessoes[0].uc, "UC00631");
+      var r2 = Agenda.sessoesDaSemana("2026-11-16", { horario: horario, edits: edits, aulas: c.aulas, faixas: c.faixas });
+      eq(r2.origem, "edicao"); eq(r2.sessoes[0].uc, "UC09999"); eq(r2.ficheiroMaisNovo, true);
+      edits["2026-11-16"].baseAtualizadoEm = "2026-11-18";
+      eq(Agenda.sessoesDaSemana("2026-11-16", { horario: horario, edits: edits, aulas: c.aulas, faixas: c.faixas }).ficheiroMaisNovo, false);
+      var r3 = Agenda.sessoesDaSemana("2026-11-23", { horario: horario, edits: {}, aulas: c.aulas, faixas: c.faixas });
+      eq(r3.origem, "previsto"); eq(r3.sessoes.length > 0, true);
+      var r4 = Agenda.sessoesDaSemana("2026-08-10", { horario: horario, edits: {}, aulas: c.aulas, faixas: c.faixas });
+      eq(r4.origem, "vazio"); eq(r4.sessoes.length, 0);
+      eq(Agenda.sessoesDaSemana("2026-11-23", { horario: null, edits: null, aulas: {}, faixas: c.faixas }).origem, "vazio");
+    });
+  });
+
+  t("agenda novoEvento valida", function () {
+    var ok = Agenda.novoEvento({ tipo: "teste", titulo: "  Teste de redes ", uc: "UC00631", data: "2026-12-10", hora: "19:30", notas: "" });
+    eq(ok.titulo, "Teste de redes"); eq(ok.feito, false); eq(ok.nota, null); eq(typeof ok.id, "string");
+    eq(Agenda.novoEvento({ tipo: "teste", titulo: "   ", data: "2026-12-10" }), null);
+    eq(Agenda.novoEvento({ tipo: "teste", titulo: "x", data: "2026-02-30" }), null);
+    eq(Agenda.novoEvento({ tipo: "teste", titulo: "x", data: "2026-12-10", hora: "25:61" }), null);
+    eq(Agenda.novoEvento({ tipo: "xpto", titulo: "x", data: "2026-12-10" }).tipo, "outro");
+    eq(Agenda.novoEvento({ tipo: "teste", titulo: "x", data: "2026-12-10" }).hora, "");
+    eq(Agenda.novoEvento({ tipo: "teste", titulo: "a", data: "2026-12-10" }).id === Agenda.novoEvento({ tipo: "teste", titulo: "a", data: "2026-12-10" }).id, false, "ids únicos");
+  });
+
+  t("agenda eventos do dia e próximos prazos", function () {
+    var ev = [
+      { id: "1", titulo: "B", data: "2026-12-10", hora: "20:00", feito: false },
+      { id: "2", titulo: "A", data: "2026-12-10", hora: "", feito: false },
+      { id: "3", titulo: "C", data: "2026-12-12", hora: "", feito: true },
+      { id: "4", titulo: "D", data: "2026-12-30", hora: "", feito: false },
+      { id: "5", titulo: "E", data: "2026-12-01", hora: "", feito: false },
+    ];
+    eq(Agenda.eventosDoDia(ev, "2026-12-10").map(function (e) { return e.id; }).join(), "2,1", "sem hora primeiro");
+    eq(Agenda.proximosPrazos(ev, "2026-12-05", 14).map(function (e) { return e.id; }).join(), "2,1", "ignora feitos, passados e fora da janela; ordena por data e hora");
+    eq(Agenda.proximosPrazos(ev, "2026-12-10", 0).map(function (e) { return e.id; }).join(), "2,1");
+  });
+
+  t("agenda marcos, cores, feriados e férias", function () {
+    var m = DADOS_INICIAIS.cet;
+    eq(JSON.stringify(Agenda.marcosDoDia(m, "2026-11-04")), JSON.stringify([{ uc: "UC00616", tipo: "inicio" }]));
+    var d = Agenda.marcosDoDia(m, "2026-12-02").map(function (x) { return x.uc + ":" + x.tipo; }).sort();
+    eq(d.join(), "UC00616:fim,UC01476:inicio");
+    eq(Agenda.marcosDoDia(m, "2026-11-18").length, 0);
+    var c0 = Agenda.corDoModulo(m[0].codigo, m), c1 = Agenda.corDoModulo(m[1].codigo, m);
+    eq(c0 >= 0 && c0 <= 9, true); eq(c0 !== c1, true); eq(Agenda.corDoModulo(m[0].codigo, m), c0); eq(Agenda.corDoModulo("XX", m), 0);
+  });
+  ta("agenda feriados e férias no calendário", function () {
+    return carregarCal().then(function (c) {
+      eq(Agenda.feriadoDoDia(c, "2026-12-25").nome, "Natal");
+      eq(Agenda.feriadoDoDia(c, "2027-03-26").nome, "Sexta-Feira Santa", "2027 calculado");
+      eq(Agenda.feriadoDoDia(c, "2026-11-18"), null);
+      eq(Agenda.feriasDoDia(c, "2026-08-12").nome, "Férias das turmas");
+      eq(Agenda.feriasDoDia(c, "2026-11-18"), null);
+      eq(c.fpct.inicio, "2027-05-19");
+    });
+  });
+
+  t("ícones: todos os módulos e tipos têm ícone no sprite", function () {
+    DADOS_INICIAIS.cet.forEach(function (m) {
+      var n = Icones.porModulo[m.codigo];
+      eq(typeof n, "string", m.codigo + " sem ícone");
+      eq(Icones.sprite.indexOf('id="i-' + n + '"') >= 0, true, m.codigo + " ícone " + n + " não existe no sprite");
+    });
+    Agenda.TIPOS.forEach(function (tp) { eq(Icones.sprite.indexOf('id="i-' + Icones.porTipo[tp] + '"') >= 0, true, "tipo " + tp); });
+    ["feriado", "ferias", "fpct"].forEach(function (k) { eq(Icones.sprite.indexOf('id="i-' + Icones.especiais[k] + '"') >= 0, true, k); });
+    eq(Icones.svg("shield", "x").indexOf('href="#i-shield"') > 0, true);
+    eq(Icones.svg("nao-existe").indexOf("i-pin") > 0, true, "recorre a pin");
+  });
+
+  t("descrições curtas das UC", function () {
+    DADOS_INICIAIS.cet.forEach(function (m) {
+      eq(typeof m.curto, "string", m.codigo + " sem descrição curta");
+      eq(m.curto.length > 3 && m.curto.length <= 26, true, m.codigo + " descrição com " + m.curto.length + " caracteres: " + m.curto);
+    });
+  });
+
+  t("autocolantes: imagem por categoria e escolha estável nos marcos", function () {
+    eq(Icones.imagens.marcos.length, 4);
+    var usados = {};
+    DADOS_INICIAIS.cet.forEach(function (m) {
+      ["inicio", "fim"].forEach(function (tp) {
+        var a = Icones.imagemMarco(m.codigo, tp);
+        eq(Icones.imagens.marcos.indexOf(a) >= 0, true, "fora da lista");
+        eq(Icones.imagemMarco(m.codigo, tp), a, "não estável");
+        usados[a.src] = 1;
+      });
+    });
+    eq(Object.keys(usados).length, 4, "as 4 imagens devem aparecer");
+    eq(Icones.figura(Icones.imagens.evento).indexOf("trabalho-gato-lapis.jpg") > 0, true);
+    ["feriado", "ferias", "evento"].forEach(function (k) { eq(typeof Icones.imagens[k].src, "string", k); eq(Icones.imagens[k].s > 0 && Icones.imagens[k].w > 0, true, k + " recorte"); });
+  });
+  ta("autocolantes: os ficheiros existem", function () {
+    var todos = [Icones.imagens.feriado, Icones.imagens.ferias, Icones.imagens.evento].concat(Icones.imagens.marcos);
+    return Promise.all(todos.map(function (u) { return fetch(u.src).then(function (r) { eq(r.ok, true, u.src + " não encontrado"); }); }));
+  });
+
+  t("autocolantes: fundos brancos (filtro por imagem)", function () {
+    var todas = [Icones.imagens.feriado, Icones.imagens.ferias, Icones.imagens.evento].concat(Icones.imagens.marcos);
+    todas.forEach(function (it) { eq(Icones.figura(it).indexOf("filter:") > 0, true, it.src + " sem filtro de fundo"); });
+    var dino = Icones.imagens.marcos.filter(function (m) { return m.src.indexOf("dino") > 0; })[0];
+    eq(Icones.figura(dino).indexOf("contrast(") > 0, true, "o dino precisa de contraste para ficar sem fundo cinzento");
+    eq(Icones.figura(Icones.imagens.evento).indexOf("contrast(") > 0, false, "as outras só clareiam");
+  });
+
+  t("autocolantes: todos com a mesma folga (margem)", function () {
+    eq(Icones.margem > 1, true, "margem definida");
+    var todas = [Icones.imagens.feriado, Icones.imagens.ferias, Icones.imagens.evento].concat(Icones.imagens.marcos);
+    todas.forEach(function (it) {
+      var w = (it.w / (it.s * Icones.margem) * 100).toFixed(2);
+      eq(Icones.figura(it).indexOf("width:" + w + "%") > 0, true, it.src + " fora da margem comum");
+    });
+  });
+
+  // ---- Cofre (cifra das notas) ----
+  var IT = 1000; // poucas iterações só nos testes (rápido); em produção são 250000
+  ta("cofre: ida e volta, sem texto em claro no envelope", function () {
+    var obj = { alvo: 19, segredo: "valor-secreto-123", acentos: "ação €" };
+    return Cofre.novo("frase longa de teste", IT).then(function (se) {
+      return Cofre.cifrar(obj, se).then(function (env) {
+        eq(env.cifrado, true); eq(env.versao, 2); eq(env.it, IT); eq(Cofre.ehEnvelope(env), true);
+        eq(JSON.stringify(env).indexOf("valor-secreto-123"), -1, "texto em claro no envelope");
+        return Cofre.decifrar(env, se).then(function (o) { eq(JSON.stringify(o), JSON.stringify(obj)); });
+      });
+    });
+  });
+  ta("cofre: password errada e dados adulterados falham", function () {
+    return Cofre.novo("password certa", IT).then(function (se) {
+      return Cofre.cifrar({ a: 1 }, se).then(function (env) {
+        return Cofre.derivar("password errada", env.salt, env.it).then(function (errada) {
+          return Cofre.decifrar(env, errada).then(function () { throw new Error("abriu com a password errada"); }, function () {});
+        }).then(function () {
+          var adulterado = JSON.parse(JSON.stringify(env));
+          var c = adulterado.ct; adulterado.ct = (c[0] === "A" ? "B" : "A") + c.slice(1);
+          return Cofre.decifrar(adulterado, se).then(function () { throw new Error("abriu dados adulterados"); }, function () {});
+        });
+      });
+    });
+  });
+  ta("cofre: IV novo em cada cifra; a mesma password reabre", function () {
+    return Cofre.novo("outra frase", IT).then(function (se) {
+      return Promise.all([Cofre.cifrar({ x: 1 }, se), Cofre.cifrar({ x: 1 }, se)]).then(function (e) {
+        eq(e[0].iv !== e[1].iv, true, "IV repetido"); eq(e[0].ct !== e[1].ct, true, "cifra repetida");
+        return Cofre.derivar("outra frase", e[0].salt, e[0].it).then(function (se2) { return Cofre.decifrar(e[0], se2); }).then(function (o) { eq(o.x, 1); });
+      });
+    });
+  });
+  ta("cofre: exportar e importar a chave da sessão", function () {
+    return Cofre.novo("sessão", IT).then(function (se) {
+      return Cofre.cifrar({ y: 2 }, se).then(function (env) {
+        return Cofre.exportar(se).then(Cofre.importar).then(function (se2) { return Cofre.decifrar(env, se2); }).then(function (o) { eq(o.y, 2); });
+      });
+    });
+  });
+  t("cofre: ehEnvelope", function () {
+    eq(Cofre.ehEnvelope({ versao: 2, cifrado: true, salt: "a", iv: "b", ct: "c", it: 1 }), true);
+    eq(Cofre.ehEnvelope({ versao: 1, cet: [] }), false); eq(Cofre.ehEnvelope(null), false); eq(Cofre.ehEnvelope({ cifrado: true }), false);
+  });
+
+  function concluir() {
+    document.getElementById("titulo").textContent = falhas ? "TESTES FALHARAM" : "TESTES OK";
+    document.title = document.getElementById("titulo").textContent;
+  }
+  Promise.all(pendentes).then(concluir);
+</script>
+</body>
+</html>

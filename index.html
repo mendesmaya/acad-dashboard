@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendário · Jornada Ciber</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/calendario.css">
+</head>
+<body>
+<header class="topo" id="topo"></header>
+<div class="wrap larga">
+  <div class="barra">
+    <div class="nav">
+      <button id="ant" type="button" aria-label="Período anterior">‹</button>
+      <button id="hoje" type="button">Hoje</button>
+      <button id="seg" type="button" aria-label="Período seguinte">›</button>
+      <h1 id="titulo-per"></h1>
+    </div>
+    <div class="nav">
+      <div class="grupo" role="group" aria-label="Vista">
+        <button type="button" data-vista="mes">Mês</button>
+        <button type="button" data-vista="semana">Semana</button>
+      </div>
+      <button class="primary" id="novo" type="button">+ Trabalho / teste</button>
+    </div>
+  </div>
+  <div class="camadas" id="camadas" role="group" aria-label="Camadas"></div>
+  <div class="layout">
+    <main id="vista"></main>
+    <aside class="lateral" id="lateral"></aside>
+  </div>
+</div>
+
+<dialog id="dlg-evento"><div class="dlg campos">
+  <h2 id="ev-h">Trabalho / teste</h2>
+  <div class="par">
+    <label>Tipo<select id="ev-tipo"><option value="trabalho">Trabalho</option><option value="teste">Teste</option><option value="quiz">Quiz</option><option value="entrega">Entrega</option><option value="outro">Outro</option></select></label>
+    <label>Módulo<select id="ev-uc"></select></label>
+  </div>
+  <label>Título<input id="ev-titulo" type="text" autocomplete="off"></label>
+  <div class="par">
+    <label>Data<input id="ev-data" type="date"></label>
+    <label>Hora (opcional)<input id="ev-hora" type="time"></label>
+  </div>
+  <label>Notas<textarea id="ev-notas" rows="2"></textarea></label>
+  <div class="par">
+    <label>Nota (opcional, só informativa)<input id="ev-nota" type="text" inputmode="decimal"></label>
+    <label class="cb"><input id="ev-feito" type="checkbox"> Feito</label>
+  </div>
+  <div class="erro-dlg" id="ev-erro" role="alert"></div>
+  <div class="dlg-botoes"><button class="primary" id="ev-guardar" type="button">Guardar</button><button id="ev-eliminar" type="button">Eliminar</button><button id="ev-cancelar" type="button">Cancelar</button></div>
+</div></dialog>
+
+<dialog id="dlg-sessao"><div class="dlg campos">
+  <h2 id="ss-h">Sessão</h2>
+  <label>Módulo<select id="ss-uc"></select></label>
+  <label>Data<input id="ss-data" type="date"></label>
+  <div class="par">
+    <label>Início<input id="ss-inicio" type="time"></label>
+    <label>Fim<input id="ss-fim" type="time"></label>
+  </div>
+  <label>Sala / online<input id="ss-local" type="text" autocomplete="off" placeholder="ex.: Online, 1.22"></label>
+  <label>Formador (opcional)<input id="ss-formador" type="text" autocomplete="off"></label>
+  <div class="erro-dlg" id="ss-erro" role="alert"></div>
+  <div class="dlg-botoes"><button class="primary" id="ss-guardar" type="button">Guardar</button><button id="ss-eliminar" type="button">Eliminar</button><button id="ss-cancelar" type="button">Cancelar</button></div>
+</div></dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/dados-cet.js"></script>
+<script src="js/notas-logic.js"></script>
+<script src="js/armazem.js"></script>
+<script src="js/agenda-logic.js"></script>
+<script src="js/icones.js"></script>
+<script src="js/app-comum.js"></script>
+<script>
+(function () {
+  document.body.insertAdjacentHTML("afterbegin", Icones.sprite);
+  var armazem = AppComum.iniciar({ pagina: "calendario" });
+  var MODS = DADOS_INICIAIS.cet;
+  var FAIXAS = [["19:10", "20:10"], ["20:10", "21:10"], ["21:25", "22:25"], ["22:25", "23:25"]];
+  var DIAS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+  var TIPO_ROT = { trabalho: "Trabalho", teste: "Teste", quiz: "Quiz", entrega: "Entrega", outro: "Outro" };
+  var cal = {}, horario = { semanas: {} }, agenda = { versao: 1, atualizadoEm: "", eventos: [], horarioEdits: {} };
+  var vista = ls("acad-vista", "mes"), camadas = Object.assign({ aulas: true, modulos: true, feriados: true, trabalhos: true }, ls("acad-camadas", {}));
+  var H = hoje(), ref = H, toastT = null, emEdicao = null;
+
+  function ls(k, def) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null ? def : v; } catch (e) { return def; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignora */ } }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function hoje() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function utc(iso) { return new Date(iso + "T00:00:00Z"); }
+  function fmtData(iso, op) { return new Intl.DateTimeFormat("pt-PT", Object.assign({ timeZone: "UTC" }, op)).format(utc(iso)); }
+  function cor(uc) { return MODS.some(function (m) { return m.codigo === uc; }) ? "c" + Agenda.corDoModulo(uc, MODS) : "cn"; }
+  function curtoUc(uc) { var m = MODS.filter(function (x) { return x.codigo === uc; })[0]; return m ? m.curto : ""; }
+  function nomeUc(uc) { var m = MODS.filter(function (x) { return x.codigo === uc; })[0]; return m ? m.nome : ""; }
+  function ctx() { return { horario: horario, edits: agenda.horarioEdits, aulas: cal.aulas || {}, faixas: cal.faixas || FAIXAS }; }
+  function salvarAgenda() { armazem.guardar("agenda", agenda); }
+  function rid() { return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function somarMeses(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; y += Math.floor(m / 12); m = ((m % 12) + 12) % 12; return y + "-" + String(m + 1).padStart(2, "0") + "-01"; }
+
+  function toast(txt, acao) {
+    var el = $("toast"); el.textContent = txt;
+    if (acao) { var b = document.createElement("button"); b.type = "button"; b.textContent = acao.label; b.addEventListener("click", function () { acao.fn(); el.classList.remove("show"); }); el.appendChild(b); }
+    el.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(function () { el.classList.remove("show"); }, acao ? 7000 : 3200);
+  }
+
+  // ---------- peças ----------
+  function chipEvento(e) {
+    var rot = TIPO_ROT[e.tipo] + " - " + e.titulo;
+    var tip = rot + (e.hora ? " · " + e.hora : "") + (e.uc ? " · " + e.uc + " " + nomeUc(e.uc) : "") + (e.nota !== null && e.nota !== "" && e.nota !== undefined ? " · nota " + e.nota : "") + (e.notas ? " · " + e.notas : "");
+    return '<button type="button" class="ev cor ' + cor(e.uc) + (e.feito ? " feito" : "") + '" data-ev="' + esc(e.id) + '" title="' + esc(tip) + '">' + esc(rot) + "</button>";
+  }
+
+  function icoModulo(uc) { return Icones.svg(Icones.porModulo[uc] || "pin"); }
+  function celula(d, mes, sess) {
+    var fer = camadas.feriados ? Agenda.feriadoDoDia(cal, d) : null, fe = camadas.feriados ? Agenda.feriasDoDia(cal, d) : null;
+    var evs = camadas.trabalhos ? Agenda.eventosDoDia(agenda.eventos, d) : [], marcos = camadas.modulos ? Agenda.marcosDoDia(MODS, d) : [];
+    var tipo = "", tcl = "", ico = "", tit = "", titHtml = "";
+    if (evs.length) { tipo = "evento"; tcl = cor(evs[0].uc) === "cn" ? "c0" : cor(evs[0].uc); ico = Icones.porTipo[evs[0].tipo] || "pin"; }
+    else if (fer) { tipo = "feriado"; tcl = "t-feriado"; ico = Icones.especiais.feriado; tit = fer.nome; titHtml = esc(tit); }
+    else if (marcos.length) { tipo = "marco"; tcl = cor(marcos[0].uc); ico = Icones.porModulo[marcos[0].uc] || "pin"; tit = marcos.map(function (m) { return (m.tipo === "inicio" ? "Início " : "Fim ") + m.uc + " " + curtoUc(m.uc); }).join(" · "); titHtml = marcos.map(function (m) { return "<b>" + (m.tipo === "inicio" ? "Início " : "Fim ") + esc(m.uc) + "</b><small>" + esc(curtoUc(m.uc)) + "</small>"; }).join(""); }
+    else if (fe) { tipo = "ferias"; tcl = "t-ferias"; ico = Icones.especiais.ferias; tit = fe.nome; titHtml = esc(tit); }
+    var cl = "dia" + (Number(d.slice(5, 7)) !== mes ? " fora" : "") + (d === H ? " hoje" : "") + (Agenda.diaSemana(d) >= 5 ? " fds" : "") + (tipo ? " especial " + tcl : "");
+    var aulasTxt = sess.filter(function (s) { return s.uc; }).map(function (s) { return s.uc; }).filter(function (u, i, arr) { return arr.indexOf(u) === i; }).join(", ");
+    var h = '<div class="' + cl + '" data-novo="' + d + '" title="' + esc([tit, aulasTxt ? "Aulas: " + aulasTxt : ""].filter(Boolean).join(" · ")) + '"><span class="num">' + Number(d.slice(8)) + (d.slice(8) === "01" ? " " + fmtData(d, { month: "short" }) : "") + "</span>";
+    if (tipo) {
+      var it = tipo === "evento" ? Icones.imagens.evento : tipo === "feriado" ? Icones.imagens.feriado : tipo === "ferias" ? Icones.imagens.ferias : Icones.imagemMarco(marcos[0].uc, marcos[0].tipo);
+      h += '<span class="sticker">' + Icones.figura(it) + "</span>";
+    }
+    h += '<div class="corpo">';
+    if (titHtml) h += '<span class="tit">' + titHtml + "</span>";
+    if (fer && tipo !== "feriado") h += '<span class="rotulo feriado">' + esc(fer.nome) + "</span>";
+    else if (fe && !fer && tipo !== "ferias") h += '<span class="rotulo ferias">' + esc(fe.nome) + "</span>";
+    if (marcos.length && tipo !== "marco") h += '<span class="rotulo marco-txt">' + marcos.map(function (m) { return (m.tipo === "inicio" ? "início " : "fim ") + m.uc; }).join(" · ") + "</span>";
+    if (cal.fpct && d >= cal.fpct.inicio && d <= cal.fpct.fim && camadas.aulas && Agenda.diaSemana(d) < 5) h += '<span class="rotulo ferias">FPCT</span>';
+    if (camadas.aulas && sess.length) {
+      var vistos = {}, u = "";
+      var uMarcos = tipo === "marco" ? marcos.map(function (m) { return m.uc; }) : [];
+      sess.forEach(function (s) { var k = s.uc + (s.previsto ? "p" : ""); if (s.uc && !vistos[k] && uMarcos.indexOf(s.uc) < 0) { vistos[k] = 1; u += '<span class="uc cor ' + cor(s.uc) + (s.previsto ? " previsto" : "") + '" title="' + esc(s.uc + " " + nomeUc(s.uc) + (s.previsto ? " (previsto)" : "")) + '">' + "<b>" + icoModulo(s.uc) + esc(s.uc) + "</b><small>" + esc(curtoUc(s.uc)) + "</small></span>"; } });
+      h += '<span class="ucs">' + u + "</span>";
+    }
+    evs.forEach(function (e) { h += chipEvento(e); });
+    return h + "</div></div>";
+  }
+
+  // ---------- vistas ----------
+  function renderMes() {
+    var ano = +ref.slice(0, 4), mes = +ref.slice(5, 7), semanas = Agenda.gradeMes(ano, mes);
+    var h = '<div class="mes" style="--linhas:' + semanas.length + '"><div class="cab">' + DIAS.map(function (d) { return "<div>" + d + "</div>"; }).join("") + "</div>";
+    semanas.forEach(function (w) {
+      var r = Agenda.sessoesDaSemana(w[0], ctx()), por = {};
+      r.sessoes.forEach(function (s) { (por[s.data] = por[s.data] || []).push(s); });
+      h += '<div class="semana-linha">' + w.map(function (d) { return celula(d, mes, por[d] || []); }).join("") + "</div>";
+    });
+    $("vista").innerHTML = h + "</div>";
+    var tm = fmtData(ref.slice(0, 7) + "-01", { month: "long", year: "numeric" }).replace(" de ", " "); $("titulo-per").textContent = tm.charAt(0).toUpperCase() + tm.slice(1);
+  }
+
+  function renderSemana() {
+    var seg = Agenda.segundaDaSemana(ref), r = Agenda.sessoesDaSemana(seg, ctx()), dias = [];
+    for (var i = 0; i < 7; i++) dias.push(Agenda.somarDias(seg, i));
+    var min = Infinity, max = 0;
+    r.sessoes.forEach(function (s) { min = Math.min(min, Agenda.horaParaMin(s.inicio)); max = Math.max(max, Agenda.horaParaMin(s.fim)); });
+    if (!isFinite(min)) { min = 19 * 60; max = 23 * 60 + 30; }
+    var ini = Math.max(0, Math.floor((min - 30) / 60) * 60), fim = Math.min(1440, Math.ceil((max + 30) / 60) * 60), alt = fim - ini;
+    var rotOrigem = { edicao: "Editado por ti", horario: "Horário do ficheiro (atualizado a " + (horario.semanas[seg] && horario.semanas[seg].atualizadoEm) + ")", previsto: "Previsão do cronograma (ainda sem horário desta semana)", vazio: "Sem aulas nesta semana" }[r.origem];
+    var info = '<div class="sem-info"><span class="tag ' + (r.origem === "previsto" ? "" : "on") + '">' + esc(rotOrigem) + '</span><button type="button" id="add-ss">+ Sessão</button>';
+    if (r.origem === "edicao") info += '<button type="button" class="ghost" id="repor-sem">Repor semana</button>';
+    if (r.ficheiroMaisNovo) info += '<span class="aviso-novo">O ficheiro tem uma versão mais recente desta semana.</span><button type="button" id="usar-ficheiro">Usar a do ficheiro</button>';
+    info += "</div>";
+    var g = '<div class="grelha"><div></div>';
+    dias.forEach(function (d, k) {
+      var fer = camadas.feriados ? Agenda.feriadoDoDia(cal, d) : null, fe = camadas.feriados ? Agenda.feriasDoDia(cal, d) : null;
+      g += '<div class="cabd' + (d === H ? " hoje" : "") + '" data-novo="' + d + '" title="Novo trabalho/teste neste dia"><b>' + DIAS[k] + " " + Number(d.slice(8)) + "/" + d.slice(5, 7) + "</b><small class=\"" + (fer ? "feriado" : fe ? "ferias" : "") + '">' + esc(fer ? fer.nome : fe ? fe.nome : "") + "</small></div>";
+    });
+    g += '<div class="rot">Prazos</div>';
+    dias.forEach(function (d) {
+      var c = "";
+      if (camadas.modulos) Agenda.marcosDoDia(MODS, d).forEach(function (m) { c += '<span class="marco ' + cor(m.uc) + ' cor" style="border:1px dashed">' + (m.tipo === "inicio" ? "início " : "fim ") + m.uc + "</span>"; });
+      if (camadas.trabalhos) Agenda.eventosDoDia(agenda.eventos, d).forEach(function (e) { c += chipEvento(e); });
+      g += '<div class="prazos">' + c + "</div>";
+    });
+    var horas = '<div class="horas" style="height:' + alt + 'px">';
+    for (var hh = Math.ceil(ini / 60) * 60; hh <= fim; hh += 60) horas += '<span style="top:' + (hh - ini) + 'px">' + String(hh / 60).padStart(2, "0") + ":00</span>";
+    g += horas + "</div>";
+    dias.forEach(function (d) {
+      var c = '<div class="col' + (Agenda.diaSemana(d) >= 5 ? " fds" : "") + '" style="height:' + alt + 'px">';
+      for (var hh2 = Math.ceil(ini / 60) * 60; hh2 < fim; hh2 += 60) c += '<div class="linha-h" style="top:' + (hh2 - ini) + 'px"></div>';
+      if (camadas.aulas) r.sessoes.filter(function (s) { return s.data === d; }).forEach(function (s) {
+        var a = Agenda.horaParaMin(s.inicio), b = Agenda.horaParaMin(s.fim), tip = s.uc + " " + nomeUc(s.uc) + (s.local ? " · " + s.local : "") + " · " + s.inicio + "–" + s.fim + (s.previsto ? " (previsto)" : "");
+        c += '<button type="button" class="bloco cor ' + cor(s.uc) + (s.previsto ? " previsto" : "") + '" data-ss="' + esc(s.id) + '" data-sdata="' + d + '" style="top:' + (a - ini) + "px;height:" + Math.max(18, b - a - 2) + 'px" title="' + esc(tip) + '"><b>' + s.inicio + "–" + s.fim + "</b>" + icoModulo(s.uc) + esc(s.uc || "Sessão") + "<small>" + esc((s.local ? s.local + " · " : "") + nomeUc(s.uc)) + "</small></button>";
+      });
+      g += c + "</div>";
+    });
+    g += "</div>";
+    if (!r.sessoes.length) g += '<div class="vazio-sem">Sem aulas nesta semana (férias, feriados ou fora do cronograma). Podes adicionar uma sessão.</div>';
+    $("vista").innerHTML = info + '<div class="semana">' + g + "</div>";
+    var f = Agenda.somarDias(seg, 6), mesmoAno = seg.slice(0, 4) === f.slice(0, 4);
+    $("titulo-per").textContent = fmtData(seg, { day: "numeric", month: "short" }) + " – " + fmtData(f, { day: "numeric", month: "short", year: "numeric" }) + (mesmoAno ? "" : "");
+  }
+
+  function renderLateral() {
+    var seg = Agenda.segundaDaSemana(H), r = Agenda.sessoesDaSemana(seg, ctx());
+    var hojeS = r.sessoes.filter(function (s) { return s.data === H; });
+    var h = '<div class="panel"><h2>Hoje · ' + fmtData(H, { weekday: "long", day: "numeric", month: "short" }) + '</h2><div class="hoje-lista">';
+    var fer = Agenda.feriadoDoDia(cal, H), fe = Agenda.feriasDoDia(cal, H);
+    if (fer || fe) h += "<div>" + esc((fer || fe).nome) + "</div>";
+    if (!hojeS.length && !fer && !fe) h += '<div style="color:var(--muted)">Sem aulas hoje.</div>';
+    hojeS.forEach(function (s) { h += '<div class="hs cor ' + cor(s.uc) + (s.previsto ? " previsto" : "") + '">' + s.inicio + "–" + s.fim + " · <b>" + esc(s.uc) + "</b> " + esc(nomeUc(s.uc)) + (s.local ? " · " + esc(s.local) : "") + (s.previsto ? " (previsto)" : "") + "</div>"; });
+    h += "</div></div>";
+    var pr = Agenda.proximosPrazos(agenda.eventos, H, 14);
+    h += '<div class="panel"><h2>Próximos prazos · 14 dias</h2>';
+    if (!pr.length) h += '<div style="color:var(--muted);font-size:.88rem">Nada nos próximos 14 dias.</div>';
+    pr.forEach(function (e) {
+      h += '<div class="prazo"><input type="checkbox" data-feito="' + esc(e.id) + '" aria-label="Marcar como feito: ' + esc(e.titulo) + '"><button type="button" data-ev="' + esc(e.id) + '"><b>' + esc(TIPO_ROT[e.tipo] + " - " + e.titulo) + '</b><span class="quando">' + fmtData(e.data, { weekday: "short", day: "numeric", month: "short" }) + (e.hora ? " · " + e.hora : "") + (e.uc ? " · " + esc(e.uc) + " " + esc(curtoUc(e.uc)) : "") + "</span></button></div>";
+    });
+    $("lateral").innerHTML = h + '</div><figure class="selo"><div class="moldura"><img src="img/selo-gato.png" alt="Selo postal chinês de 1983 com um gato preto de olhos verdes" loading="lazy"></div></figure>';
+  }
+
+  function renderCamadas() {
+    var nomes = { aulas: "Aulas", modulos: "Módulos (início/fim)", feriados: "Feriados e férias", trabalhos: "Trabalhos e testes" };
+    $("camadas").innerHTML = Object.keys(nomes).map(function (k) { return '<button type="button" data-camada="' + k + '" aria-pressed="' + !!camadas[k] + '">' + nomes[k] + "</button>"; }).join("");
+    document.querySelectorAll("[data-vista]").forEach(function (b) { b.classList.toggle("on", b.getAttribute("data-vista") === vista); b.setAttribute("aria-pressed", b.getAttribute("data-vista") === vista); });
+  }
+
+  function render() { H = hoje(); if (vista === "semana") renderSemana(); else renderMes(); renderLateral(); renderCamadas(); }
+
+  // ---------- trabalhos e testes ----------
+  function preencherUcs(sel, vazioTxt) {
+    sel.innerHTML = '<option value="">' + vazioTxt + "</option>" + MODS.map(function (m) { return '<option value="' + m.codigo + '">' + m.codigo + " · " + esc(m.nome) + "</option>"; }).join("");
+  }
+  function abrirEvento(id, data) {
+    var e = id ? agenda.eventos.filter(function (x) { return x.id === id; })[0] : null;
+    emEdicao = e ? e.id : null;
+    $("ev-h").textContent = e ? "Editar trabalho / teste" : "Novo trabalho / teste";
+    $("ev-tipo").value = e ? e.tipo : "teste"; $("ev-uc").value = e ? e.uc : ""; $("ev-titulo").value = e ? e.titulo : "";
+    $("ev-data").value = e ? e.data : (data || H); $("ev-hora").value = e ? e.hora : ""; $("ev-notas").value = e ? e.notas : "";
+    $("ev-nota").value = e && e.nota !== null && e.nota !== undefined ? String(e.nota).replace(".", ",") : ""; $("ev-feito").checked = e ? !!e.feito : false;
+    $("ev-eliminar").hidden = !e; $("ev-erro").textContent = "";
+    $("dlg-evento").showModal(); $("ev-titulo").focus();
+  }
+  function guardarEvento() {
+    var notaTxt = $("ev-nota").value.trim().replace(",", "."), o = {
+      tipo: $("ev-tipo").value, uc: $("ev-uc").value, titulo: $("ev-titulo").value, data: $("ev-data").value, hora: $("ev-hora").value, notas: $("ev-notas").value,
+    };
+    var nota = notaTxt === "" ? null : Number(notaTxt);
+    if (emEdicao) {
+      var e = agenda.eventos.filter(function (x) { return x.id === emEdicao; })[0], novo = Object.assign({}, e, o, { titulo: o.titulo.trim(), feito: $("ev-feito").checked, nota: nota });
+      var erro = Agenda.validarEvento(novo); if (erro) { $("ev-erro").textContent = erro; return; }
+      Object.assign(e, novo);
+    } else {
+      var n = Agenda.novoEvento(o);
+      if (!n) { $("ev-erro").textContent = Agenda.validarEvento(Object.assign({ nota: null }, o)) || "Dados inválidos."; return; }
+      n.feito = $("ev-feito").checked; n.nota = nota;
+      var e2 = Agenda.validarEvento(n); if (e2) { $("ev-erro").textContent = e2; return; }
+      agenda.eventos.push(n);
+    }
+    salvarAgenda(); $("dlg-evento").close(); render(); toast("Guardado.");
+  }
+  function eliminarEvento() {
+    var i = agenda.eventos.findIndex(function (x) { return x.id === emEdicao; }); if (i < 0) return;
+    var removido = agenda.eventos.splice(i, 1)[0];
+    salvarAgenda(); $("dlg-evento").close(); render();
+    toast("Eliminado.", { label: "Desfazer", fn: function () { agenda.eventos.push(removido); salvarAgenda(); render(); } });
+  }
+
+  // ---------- horário (edições à mão) ----------
+  function garantirEdicao(seg) {
+    if (!agenda.horarioEdits[seg]) {
+      var r = Agenda.sessoesDaSemana(seg, ctx()), sem = horario.semanas && horario.semanas[seg];
+      agenda.horarioEdits[seg] = { baseAtualizadoEm: sem ? sem.atualizadoEm || "" : "", sessoes: r.sessoes.map(function (s) { var c = Object.assign({}, s); delete c.previsto; return c; }) };
+    }
+    return agenda.horarioEdits[seg];
+  }
+  var ssAtual = null; // { id, seg } ou null para nova
+  function abrirSessao(id, data) {
+    var s = null;
+    if (id) { var seg0 = Agenda.segundaDaSemana(data), r = Agenda.sessoesDaSemana(seg0, ctx()); s = r.sessoes.filter(function (x) { return x.id === id; })[0] || null; }
+    ssAtual = s ? { id: s.id, data: s.data } : null;
+    $("ss-h").textContent = s ? "Editar sessão" : "Nova sessão";
+    $("ss-uc").value = s ? s.uc : ""; $("ss-data").value = s ? s.data : (data || Agenda.segundaDaSemana(ref));
+    $("ss-inicio").value = s ? s.inicio : "19:10"; $("ss-fim").value = s ? s.fim : "21:10"; $("ss-local").value = s ? s.local || "" : ""; $("ss-formador").value = s ? s.formador || "" : "";
+    $("ss-eliminar").hidden = !s; $("ss-erro").textContent = "";
+    $("dlg-sessao").showModal();
+  }
+  function guardarSessao() {
+    var d = $("ss-data").value, i = $("ss-inicio").value, f = $("ss-fim").value;
+    if (!Agenda.dataValida(d)) { $("ss-erro").textContent = "Data inválida."; return; }
+    if (!i || !f || !Agenda.horaValida(i) || !Agenda.horaValida(f) || Agenda.horaParaMin(i) >= Agenda.horaParaMin(f)) { $("ss-erro").textContent = "Horas inválidas (o fim tem de ser depois do início)."; return; }
+    var nova = { id: ssAtual ? ssAtual.id : rid(), data: d, inicio: i, fim: f, uc: $("ss-uc").value, local: $("ss-local").value.trim(), formador: $("ss-formador").value.trim() };
+    if (ssAtual) { var segA = Agenda.segundaDaSemana(ssAtual.data), edA = garantirEdicao(segA); edA.sessoes = edA.sessoes.filter(function (x) { return x.id !== ssAtual.id; }); }
+    var segN = Agenda.segundaDaSemana(d), edN = garantirEdicao(segN);
+    edN.sessoes.push(nova);
+    salvarAgenda(); $("dlg-sessao").close(); render(); toast("Sessão guardada.");
+  }
+  function eliminarSessao() {
+    if (!ssAtual) return;
+    var seg = Agenda.segundaDaSemana(ssAtual.data), ed = garantirEdicao(seg);
+    var antes = JSON.stringify(ed.sessoes);
+    ed.sessoes = ed.sessoes.filter(function (x) { return x.id !== ssAtual.id; });
+    salvarAgenda(); $("dlg-sessao").close(); render();
+    toast("Sessão eliminada.", { label: "Desfazer", fn: function () { agenda.horarioEdits[seg].sessoes = JSON.parse(antes); salvarAgenda(); render(); } });
+  }
+  function reporSemana() {
+    var seg = Agenda.segundaDaSemana(ref), antes = agenda.horarioEdits[seg]; if (!antes) return;
+    delete agenda.horarioEdits[seg]; salvarAgenda(); render();
+    toast("Semana reposta.", { label: "Desfazer", fn: function () { agenda.horarioEdits[seg] = antes; salvarAgenda(); render(); } });
+  }
+
+  // ---------- eventos ----------
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    var b;
+    if ((b = t.closest("[data-ev]"))) { abrirEvento(b.getAttribute("data-ev")); return; }
+    if ((b = t.closest("[data-ss]"))) { abrirSessao(b.getAttribute("data-ss"), b.getAttribute("data-sdata")); return; }
+    if ((b = t.closest("[data-camada]"))) { var k = b.getAttribute("data-camada"); camadas[k] = !camadas[k]; lsSet("acad-camadas", camadas); render(); return; }
+    if ((b = t.closest("[data-vista]"))) { vista = b.getAttribute("data-vista"); lsSet("acad-vista", vista); render(); return; }
+    if ((b = t.closest("[data-novo]"))) { abrirEvento(null, b.getAttribute("data-novo")); return; }
+    if (t.id === "add-ss") { abrirSessao(null, ref >= Agenda.segundaDaSemana(ref) ? (Agenda.segundaDaSemana(ref) <= H && H <= Agenda.somarDias(Agenda.segundaDaSemana(ref), 6) ? H : Agenda.segundaDaSemana(ref)) : ref); return; }
+    if (t.id === "repor-sem" || t.id === "usar-ficheiro") { reporSemana(); return; }
+  });
+  document.addEventListener("change", function (e) {
+    var id = e.target.getAttribute && e.target.getAttribute("data-feito"); if (!id) return;
+    var ev = agenda.eventos.filter(function (x) { return x.id === id; })[0]; if (!ev) return;
+    ev.feito = e.target.checked; salvarAgenda(); render();
+  });
+  $("ant").addEventListener("click", function () { ref = vista === "mes" ? somarMeses(ref, -1) : Agenda.somarDias(ref, -7); render(); });
+  $("seg").addEventListener("click", function () { ref = vista === "mes" ? somarMeses(ref, 1) : Agenda.somarDias(ref, 7); render(); });
+  $("hoje").addEventListener("click", function () { ref = hoje(); render(); });
+  $("novo").addEventListener("click", function () { abrirEvento(null, vista === "semana" ? (Agenda.segundaDaSemana(ref) <= H && H <= Agenda.somarDias(Agenda.segundaDaSemana(ref), 6) ? H : Agenda.segundaDaSemana(ref)) : H); });
+  $("ev-guardar").addEventListener("click", guardarEvento);
+  $("ev-eliminar").addEventListener("click", eliminarEvento);
+  $("ev-cancelar").addEventListener("click", function () { $("dlg-evento").close(); });
+  $("ss-guardar").addEventListener("click", guardarSessao);
+  $("ss-eliminar").addEventListener("click", eliminarSessao);
+  $("ss-cancelar").addEventListener("click", function () { $("dlg-sessao").close(); });
+
+  // ---------- arranque ----------
+  preencherUcs($("ev-uc"), "— sem módulo —");
+  preencherUcs($("ss-uc"), "— outro —");
+  render();
+  Promise.all([
+    armazem.carregar("calendario", {}),
+    armazem.carregar("horario", { semanas: {} }),
+    armazem.carregar("agenda", { versao: 1, atualizadoEm: "", eventos: [], horarioEdits: {} }),
+  ]).then(function (r) {
+    cal = r[0].dados || {};
+    horario = r[1].dados && r[1].dados.semanas ? r[1].dados : { semanas: {} };
+    var a = r[2].dados || {};
+    agenda = { versao: 1, atualizadoEm: a.atualizadoEm || "", eventos: Array.isArray(a.eventos) ? a.eventos : [], horarioEdits: a.horarioEdits && typeof a.horarioEdits === "object" ? a.horarioEdits : {} };
+    render();
+    if (r[2].origem === "local" && r[2].pendente) toast("Tens alterações por guardar neste dispositivo.");
+  });
+})();
+</script>
+</body>
+</html>

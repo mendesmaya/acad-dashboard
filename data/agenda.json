@@ -1,0 +1,18 @@
+{
+  "versao": 1,
+  "atualizadoEm": "2026-11-18T16:00:37.772Z",
+  "eventos": [
+    {
+      "id": "emwmb5ll82n7n2",
+      "tipo": "trabalho",
+      "titulo": "Labs 10 e 11",
+      "uc": "UC01481",
+      "data": "2026-12-03",
+      "hora": "23:58",
+      "notas": "",
+      "feito": false,
+      "nota": null
+    }
+  ],
+  "horarioEdits": {}
+}
